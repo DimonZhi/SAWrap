@@ -137,7 +137,8 @@ def eval_regression_model(model, X, y_true) -> Dict[str, float]:
 # --- метрики аналиаз выживаемости -------------------------------------------------
 def cindex_survival(y, risk) -> float:
     time, event = _split_time_event(y)
-    return float(concordance_index(time, event, np.asarray(risk, float)))
+    risk = np.asarray(risk, float)
+    return float(concordance_index(time, risk, event.astype(int)))
 
 
 def cindex_survival_model(model, X, y) -> float:
