@@ -66,20 +66,9 @@ def _get_survival_from_model(model, X):
         S = np.asarray(out, float)
         return S, None
 def _get_risk_from_model(model, X) -> np.ndarray:
-    if hasattr(model, "predict_risk"):
-        return np.asarray(model.predict_risk(X), float).ravel()
-
-    if hasattr(model, "predict_partial_hazard"):
-        r = model.predict_partial_hazard(X)
-        if hasattr(r, "values"):
-            r = r.values
-        return np.asarray(r, float).ravel()
-
-    if hasattr(model, "predict_proba"):
-        proba = model.predict_proba(X)
-        return np.asarray(proba[:, 1], float)
-
-    raise ValueError("Не удалось получить риск из модели.")
+    S, t_grid = _get_survival_from_model(model, X)
+    risk = np.trapz(1.0 - S, t_grid, axis=1)
+    return risk
 
 # --- метрики классификации -------------------------------------------------
 
