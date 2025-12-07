@@ -27,7 +27,8 @@ def _to_binary_labels(y) -> np.ndarray:
     if "event" in names:
         return y["event"].astype(int)
     if "cens" in names:
-        return (~y["cens"]).astype(int)
+        return y["cens"].astype(int)
+
 
     raise ValueError(f"Не могу извлечь бинарные метки из y с полями {names}")
 
@@ -54,20 +55,17 @@ def _split_time_event(y) -> Tuple[np.ndarray, np.ndarray]:
 
     return time, event
 
-def _get_survival_from_model(model, X):
+def _get_survival_from_model(model, X, bins) -> np.ndarray:
     if not hasattr(model, "predict_survival_function"):
         raise ValueError("У модели нет метода predict_survival_function(X)")
 
-    out = model.predict_survival_function(X)
-    if isinstance(out, tuple) and len(out) == 2:
-        S, t_grid = out
-        return np.asarray(S, float), np.asarray(t_grid, float)
-    else:
-        S = np.asarray(out, float)
-        return S, None
-def _get_risk_from_model(model, X) -> np.ndarray:
-    S, t_grid = _get_survival_from_model(model, X)
-    risk = np.trapz(1.0 - S, t_grid, axis=1)
+    S = model.predict_survival_function(X, bins)
+    if isinstance(S, tuple) and len(S) == 2:
+        S, _ = S
+        return np.asarray(S, float)
+def _get_risk_from_model(model, X, bins) -> np.ndarray:
+    S = _get_survival_from_model(model, X, bins)
+    risk = np.trapz(S, bins, axis=1)
     return risk
 
 # --- метрики классификации -------------------------------------------------
@@ -142,12 +140,10 @@ def eval_survival_curves(y_train, y_test, pred_sf, bins):
     }
 
 
-def eval_survival_model(model, X_train, y_train, X_test, y_test, bins=None):
-    risk = _get_risk_from_model(model, X_test)
+def eval_survival_model(model, X_train, y_train, X_test, y_test, bins):
+    risk = _get_risk_from_model(model, X_test, bins)
     ci = cindex_survival(y_test, risk)
-    S, t_grid = _get_survival_from_model(model, X_test)
-    if bins is None:
-        bins = t_grid if t_grid is not None else 50
+    S = _get_survival_from_model(model, X_test, bins)
 
     curves = eval_survival_curves(y_train, y_test, S, bins)
 
