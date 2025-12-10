@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}SAWrapSA{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="{{ url_for('static', path='css/styles.css') }}" rel="stylesheet">
+</head>
+<body>
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="topbar-left">
+            <details class="topmenu">
+                <summary class="topmenu-summary">
+                    Overtview
+                </summary>
+                <div class="topmenu-dropdown">
+                    <a href="{{ url_for('goal_page') }}" class="topmenu-item">
+                        Цель проекта
+                    </a>
+                    <a href="{{ url_for('link_page') }}" class="topmenu-item">
+                        Ссылка
+                    </a>
+                    <a href="{{ url_for('methodology_page') }}" class="topmenu-item">
+                        Методология разработки
+                    </a>
+                    <a href="{{ url_for('example_page') }}" class="topmenu-item">
+                        Пример
+                    </a>
+                </div>
+            </details>
+        </div>
+
+        <div class="topbar-center">
+            <a href="{{ url_for('home') }}" class="logo">
+                SAWrapSA
+            </a>
+        </div>
+
+        <div class="topbar-right">
+        </div>
+    </div>
+</header>
+
+<main class="content">
+    {% if messages %}
+        <div class="flash-container">
+            {% for m in messages %}
+                <div class="flash flash-{{ m.category }}">{{ m.text }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>
