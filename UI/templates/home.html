@@ -4,9 +4,30 @@
 {% block content %}
 <div class="page-header">
     <h1>Главная</h1>
-    <p class="page-subtitle">Добро пожаловать в интерфейс SAWrapSA</p>
+    <p class="page-subtitle">Выбери датасет, пресет метрик и набор моделей из sklearn, lifelines и survivors.</p>
 </div>
-
+<form action = "{{url_for('compare_models')}}" method="post" class="grid-2">
+    <section class = "card">
+        <h2 style="margin-top:0;font-size:18px;">Данные и пресет метрик</h2>
+        <label class = "field-label">Датасет из survivors</label>
+        <select name = "dataset_id" class = "input-field">
+            {% for ds in datasets %}
+            <option value="{{ds.id}}">
+                {% if selected and selected_dataset_id == ds.id %}selected{% endif %}
+                {{ds.label}}     
+            </option>
+            {% endfor %}
+        </select>
+        <label class = "field-label" style = "margin-top:10px">Пресет из двух метрик</label>
+        <select name = "preset_id" class = "input-field">
+            {% for p in presets %}
+            <option value="{{p.id}}">
+                {% if selected and selected.preset_id == p.id %}selected{% endif %}
+                {{p.label}}     
+            </option>
+            {% endfor %}
+    </section>
+</form>
 <div class="card">
     <p>График</p>
 </div>

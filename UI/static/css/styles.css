@@ -170,3 +170,9 @@ body {
     background: #fee2e2;
     color: #991b1b;
 }
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+}
