@@ -6,29 +6,127 @@
     <h1>Главная</h1>
     <p class="page-subtitle">Выбери датасет, пресет метрик и набор моделей из sklearn, lifelines и survivors.</p>
 </div>
-<form action = "{{url_for('compare_models')}}" method="post" class="grid-2">
-    <section class = "card">
+
+<form action="{{ url_for('compare_models') }}" method="post" class="grid-2">
+    <section class="card">
         <h2 style="margin-top:0;font-size:18px;">Данные и пресет метрик</h2>
-        <label class = "field-label">Датасет из survivors</label>
-        <select name = "dataset_id" class = "input-field">
+
+        <label class="field-label">Датасет из survivors</label>
+        <select name="dataset_id" class="input-field">
             {% for ds in datasets %}
-            <option value="{{ds.id}}">
-                {% if selected and selected_dataset_id == ds.id %}selected{% endif %}
-                {{ds.label}}     
-            </option>
+                <option value="{{ ds.id }}"
+                    {% if selected and selected.dataset_id == ds.id %}selected{% endif %}>
+                    {{ ds.label }}
+                </option>
             {% endfor %}
         </select>
-        <label class = "field-label" style = "margin-top:10px">Пресет из двух метрик</label>
-        <select name = "preset_id" class = "input-field">
+
+        <label class="field-label" style="margin-top:10px;">Пресет из двух метрик</label>
+        <select name="preset_id" class="input-field">
             {% for p in presets %}
-            <option value="{{p.id}}">
-                {% if selected and selected.preset_id == p.id %}selected{% endif %}
-                {{p.label}}     
-            </option>
+                <option value="{{ p.id }}"
+                    {% if selected and selected.preset_id == p.id %}selected{% endif %}>
+                    {{ p.label }}
+                </option>
             {% endfor %}
+        </select>
+    </section>
+
+    <section class="card">
+        <h2 style="margin-top:0;font-size:18px;">Модели</h2>
+        <p class="hint">Каждый список раскрывается отдельно. Можно выбрать несколько моделей.</p>
+
+        <div class="models-dropdown">
+            <button type="button" class="models-dd-btn">
+                sklearn <span class="caret">▾</span>
+            </button>
+            <div class="models-dd-menu">
+                {% for m in models if m.lib == "sklearn" %}
+                    <label class="checkbox-row">
+                        <input type="checkbox" name="model_ids" value="{{ m.id }}"
+                            {% if selected and m.id in selected.model_ids %}checked{% endif %}>
+                        <span>{{ m.label }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="models-dropdown">
+            <button type="button" class="models-dd-btn">
+                lifelines <span class="caret">▾</span>
+            </button>
+            <div class="models-dd-menu">
+                {% for m in models if m.lib == "lifelines" %}
+                    <label class="checkbox-row">
+                        <input type="checkbox" name="model_ids" value="{{ m.id }}"
+                            {% if selected and m.id in selected.model_ids %}checked{% endif %}>
+                        <span>{{ m.label }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="models-dropdown">
+            <button type="button" class="models-dd-btn">
+                survivors <span class="caret">▾</span>
+            </button>
+            <div class="models-dd-menu">
+                {% for m in models if m.lib == "survivors" %}
+                    <label class="checkbox-row">
+                        <input type="checkbox" name="model_ids" value="{{ m.id }}"
+                            {% if selected and m.id in selected.model_ids %}checked{% endif %}>
+                        <span>{{ m.label }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <section class="card span-2">
+        <button type="submit" class="btn btn-primary">▶ Построить график</button>
     </section>
 </form>
-<div class="card">
-    <p>График</p>
-</div>
+
+<section class="card" style="margin-top:16px;">
+    <h2 style="margin-top:0;font-size:18px;">График метрик (Plotly)</h2>
+    <div id="metrics-plot" style="width:100%;height:400px;"></div>
+</section>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(function () {
+    // dropdown models
+    document.querySelectorAll('.models-dropdown').forEach((dd) => {
+        const btn = dd.querySelector('.models-dd-btn');
+        btn.addEventListener('click', () => dd.classList.toggle('open'));
+    });
+    document.addEventListener('click', (e) => {
+        document.querySelectorAll('.models-dropdown').forEach((dd) => {
+            if (!dd.contains(e.target)) dd.classList.remove('open');
+        });
+    });
+
+    // plotly
+    {% if plot_json %}
+    const plotData = {{ plot_json | safe }};
+    const trace = {
+        x: plotData.x,
+        y: plotData.y,
+        mode: 'markers+text',
+        text: plotData.labels,
+        textposition: 'top center',
+        marker: { size: 12 }
+    };
+    const layout = {
+        margin: {l: 50, r: 20, t: 10, b: 50},
+        xaxis: {title: plotData.x_metric},
+        yaxis: {title: plotData.y_metric}
+    };
+    Plotly.newPlot('metrics-plot', [trace], layout);
+    {% else %}
+    document.getElementById('metrics-plot').innerHTML =
+        '<div style="color:#9ca3af;font-size:14px;text-align:center;margin-top:150px;">Выбери модели и нажми «Построить график»</div>';
+    {% endif %}
+})();
+</script>
 {% endblock %}

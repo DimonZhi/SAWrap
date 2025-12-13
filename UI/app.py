@@ -8,7 +8,7 @@ templates = Jinja2Templates(directory="templates")
 
 
 DATASETS = [
-    {"id": "gbsg", "labael": "GBSG"},
+    {"id": "gbsg", "label": "GBSG"},
 ]
 PRESETS = [
     {
