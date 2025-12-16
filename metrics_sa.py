@@ -62,7 +62,7 @@ def _get_survival_from_model(model, X, bins) -> np.ndarray:
     S = model.predict_survival_function(X, bins)
     if isinstance(S, tuple) and len(S) == 2:
         S, _ = S
-        return np.asarray(S, float)
+    return np.asarray(S, float)
 def _get_risk_from_model(model, X, bins) -> np.ndarray:
     S = _get_survival_from_model(model, X, bins)
     risk = np.trapz(S, bins, axis=1)
@@ -97,9 +97,6 @@ def eval_classification_model(
     y_proba = np.asarray(proba[:, proba_column], float)
     return eval_classification_proba(y_true, y_proba, threshold=threshold)
 
-
-# --- метрики ранжирования -------------------------------------------------
-
 # --- метрики регрессии -------------------------------------------------
 def eval_regression(y_true, y_pred) -> Dict[str, float]:
     """
@@ -128,8 +125,8 @@ def cindex_survival(y, risk) -> float:
     return float(concordance_index(time, risk, event.astype(int)))
 
 
-def cindex_survival_model(model, X, y) -> float:
-    risk = _get_risk_from_model(model, X)
+def cindex_survival_model(model, X, y, bins) -> float:
+    risk = _get_risk_from_model(model, X, bins)
     return cindex_survival(y, risk)
 
 

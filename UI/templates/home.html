@@ -38,10 +38,10 @@
 
         <div class="models-dropdown">
             <button type="button" class="models-dd-btn">
-                sklearn <span class="caret">▾</span>
+                Classification <span class="caret">▾</span>
             </button>
             <div class="models-dd-menu">
-                {% for m in models if m.lib == "sklearn" %}
+                {% for m in models if m.task == "classification" %}
                     <label class="checkbox-row">
                         <input type="checkbox" name="model_ids" value="{{ m.id }}"
                             {% if selected and m.id in selected.model_ids %}checked{% endif %}>
@@ -53,10 +53,10 @@
 
         <div class="models-dropdown">
             <button type="button" class="models-dd-btn">
-                lifelines <span class="caret">▾</span>
+                Regression <span class="caret">▾</span>
             </button>
             <div class="models-dd-menu">
-                {% for m in models if m.lib == "lifelines" %}
+                {% for m in models if m.task == "regression" %}
                     <label class="checkbox-row">
                         <input type="checkbox" name="model_ids" value="{{ m.id }}"
                             {% if selected and m.id in selected.model_ids %}checked{% endif %}>
@@ -68,10 +68,10 @@
 
         <div class="models-dropdown">
             <button type="button" class="models-dd-btn">
-                survivors <span class="caret">▾</span>
+                Survival Analisis <span class="caret">▾</span>
             </button>
             <div class="models-dd-menu">
-                {% for m in models if m.lib == "survivors" %}
+                {% for m in models if m.task == "survival" %}
                     <label class="checkbox-row">
                         <input type="checkbox" name="model_ids" value="{{ m.id }}"
                             {% if selected and m.id in selected.model_ids %}checked{% endif %}>
@@ -119,9 +119,18 @@
     };
     const layout = {
         margin: {l: 50, r: 20, t: 10, b: 50},
-        xaxis: {title: plotData.x_metric},
-        yaxis: {title: plotData.y_metric}
-    };
+        xaxis: {
+            title: plotData.x_metric,
+            range: [0, 1],
+            autorange: "max"
+            },
+        yaxis: {
+            title: plotData.y_metric,
+            range: [0, 1],
+            autorange: "max"
+        }
+};
+
     Plotly.newPlot('metrics-plot', [trace], layout);
     {% else %}
     document.getElementById('metrics-plot').innerHTML =
@@ -130,3 +139,11 @@
 })();
 </script>
 {% endblock %}
+{% if messages %}
+  <div class="card" style="margin-top:12px;">
+    {% for m in messages %}
+      <div>{{ m.text }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
