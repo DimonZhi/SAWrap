@@ -64,8 +64,7 @@ def _get_survival_from_model(model, X, bins) -> np.ndarray:
         S, _ = S
     return np.asarray(S, float)
 def _get_risk_from_model(model, X, bins) -> np.ndarray:
-    S = _get_survival_from_model(model, X, bins)
-    risk = np.trapz(S, bins, axis=1)
+    risk = model.predict_expected_time(X, bins)
     return risk
 
 # --- метрики классификации -------------------------------------------------
@@ -122,7 +121,8 @@ def eval_regression_model(model, X, y_true) -> Dict[str, float]:
 def cindex_survival(y, risk) -> float:
     time, event = _split_time_event(y)
     risk = np.asarray(risk, float)
-    return float(concordance_index(time, risk, event.astype(int)))
+    # return float(concordance_index(time, risk, event.astype(int)))
+    return float(concordance_index(time, risk))
 
 
 def cindex_survival_model(model, X, y, bins) -> float:

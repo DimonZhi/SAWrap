@@ -14,6 +14,8 @@ class BaseSAAdapter(ABC):
     @abstractmethod
     def predict_hazard_function(self, X, times: Optional[Sequence[float]] = None): ...
     @abstractmethod
+    def predict_expected_time(self, X, times=None): ...
+    @abstractmethod
     def predict_time(self,X): ...
     @abstractmethod
     def predict_proba(self, X): ...
@@ -94,7 +96,9 @@ class ClassifWrapSA(BaseSAAdapter):
         eps = 1e-12
         H = -np.log(np.clip(S, eps, 1.0))   # кумулятивная hazard, константна по t
         return H, t
-
+    def predict_expected_time(self, X, times=None):
+        S, t = self.predict_survival_function(X, times)
+        return np.trapz(S, t, axis=1)
     def predict_time(self, X):
         n = len(X) if hasattr(X, "__len__") else self.predict_proba(X).shape[0]
         return np.full(n, np.nan, float)
@@ -132,12 +136,13 @@ class RegrWrapSA(BaseSAAdapter):
         eps = 1e-12
         H = -np.log(np.clip(S, eps, 1.0))  # кумулятивная hazard
         return H, t
+    def predict_expected_time(self, X, times=None):
+        S, t = self.predict_survival_function(X, times)
+        return np.trapz(S, t, axis=1)
     def predict_proba(self, X):
         S, _ = self.predict_survival_function(X)
         p = 1.0 - S[:, -1]
         return np.column_stack([1.0 - p, p])
-    def predict(self, X):
-        return self.model.predict(X)
 class SAWrapSA(BaseSAAdapter):
     def __init__(self, model, times: int = 128, start_at_zero: bool = True):
         self.model = model
@@ -170,12 +175,6 @@ class SAWrapSA(BaseSAAdapter):
                     self.model.fit(durations=t, event_observed=e.astype(int))
                 else:
                     self.model.fit(t, e.astype(int))
-        # elif "survivors.external.parametric" in self._kind:
-        # # здесь CoxPH ведёт себя как survivors-модель: X + структурированный y
-        #     df = pd.DataFrame(X if isinstance(X, pd.DataFrame) else np.asarray(X)).copy()
-        #     df[time_col] = t
-        #     df[event_col] = e.astype(int)
-        #     self.model.fit(df, duration_col=time_col, event_col=event_col)
         elif self._kind.startswith("sksurv.") or "sksurv" in self._kind:
             self.model.fit(X, self._make_structured_y(t, e))
         elif "survivors" in self._kind:
@@ -243,7 +242,7 @@ class SAWrapSA(BaseSAAdapter):
                 start = 0.0 if self.start_at_zero else left
                 t = np.linspace(start, right, self.times) #разбивает на равномерную сетку
             n = len(X) if hasattr(X, "__len__") else 1
-            if hasattr(self.model, "predict_cumulative_hazard"): #двумерны
+            if hasattr(self.model, "predict_cumulative_hazard"): #двумерные
                 df = X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
                 ch = self.model.predict_cumulative_hazard(df)
                 if isinstance(ch, list):
@@ -253,11 +252,23 @@ class SAWrapSA(BaseSAAdapter):
                     H = np.vstack([np.interp(t, idx, ch.iloc[:, i].values.astype(float)) for i in range(ch.shape[1])])
                 return H, t
             if hasattr(self.model, "cumulative_hazard_at_times"): #одномерные
-                H_single = self.model.cumulative_hazard_at_times(t)
-                H_vals = np.asarray(H_single).astype(float)
-                H_vals = np.ravel(H_vals)
-                H = np.tile(H_vals[None, :], (n, 1))
-                return H, t
+                try:
+                    H_single = self.model.cumulative_hazard_at_times(t)
+                    H_vals = np.asarray(H_single).astype(float).ravel()
+                    H = np.tile(H_vals[None, :], (n, 1))
+                    return H, t
+                except NotImplementedError:
+                    pass
+            if hasattr(self.model, "survival_function_at_times"):
+                try:
+                    s = self.model.survival_function_at_times(t)
+                    s_vals = np.asarray(s).astype(float).ravel()
+                    eps = 1e-12
+                    H_vals = -np.log(np.clip(s_vals, eps, 1.0))
+                    H = np.tile(H_vals[None, :], (n, 1))
+                    return H, t
+                except NotImplementedError:
+                    pass
             S, t = self.predict_survival_function(X, t)
             eps = 1e-12
             H = -np.log(np.clip(S, eps, 1.0))
@@ -280,7 +291,9 @@ class SAWrapSA(BaseSAAdapter):
         eps = 1e-12
         H = -np.log(np.clip(S, eps, 1.0))
         return H, t
-    
+    def predict_expected_time(self, X, times=None):
+        S, t = self.predict_survival_function(X, times)
+        return np.trapz(S, t, axis=1)
     def predict_time(self, X):
         S, t = self.predict_survival_function(X)
         med = np.full(S.shape[0], np.nan, float)
@@ -315,7 +328,7 @@ def plot_many(models, X, sample: int = 0, times: Optional[Sequence[float]] = Non
             ylabel = "Survival S(t)"
         plt.plot(t_common, S[0], label=name)
     plt.xlabel("Time")
-    plt.ylabel("Survival S(t)")
+    plt.ylabel(ylabel)
     plt.title(title)
     plt.grid(True)
     plt.legend()

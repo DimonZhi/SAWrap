@@ -124,9 +124,8 @@ async def compare_models(
 
         try:
             Cls = import_class(mid)
-            raw = Cls()  # если параметры нужны — добавь mcfg.get("params", {})
+            raw = Cls()
             model = wrap_model(raw, task)
-
             model.fit(X_tr, y_tr)
 
             if task == "classification":
