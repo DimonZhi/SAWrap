@@ -5,11 +5,12 @@ from typing import List, Optional
 import json
 from fastapi import Form
 from sklearn.model_selection import train_test_split
-from survival_wrappers.metrics_sa import eval_classification_model,eval_regression_model, eval_survival_model
+from survival_wrappers.metrics_sa import eval_classification_model, eval_regression_model, eval_survival_model
 from pathlib import Path
-from survival_wrappers.wrapSA import get_bins, SAWrapSA, ClassifWrapSA, RegrWrapSA
-from survivors.datasets import load_gbsg_dataset
+from survival_wrappers.wrapSA import SAWrapSA, ClassifWrapSA, RegrWrapSA
+import survivors.datasets as ds
 import survivors.constants as cnt
+from survival_wrappers.UI.helpers_tables import  load_surv_table, lookup_metric
 
 
 app = FastAPI()
@@ -19,32 +20,27 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 DATASETS = [
-    {"id": "gbsg", "label": "GBSG"},
+    {"id": "gbsg", "label": "GBSG", "table": None},
+    {"id": "telco", "label": "Telco", "table": "tables/telco.xlsx"},
 ]
+
 PRESETS = [
   {"id":"cls_acc_roc","task":"classification","label":"Классификация: Accuracy и ROC AUC",
    "x_metric":"accuracy","y_metric":"roc_auc","x_label":"Accuracy","y_label":"ROC AUC"},
   {"id":"reg_rmse_r2","task":"regression","label":"Регрессия: RMSE и R2",
    "x_metric":"rmse","y_metric":"r2","x_label":"RMSE","y_label":"R2"},
   {"id":"surv_ci_ibs","task":"survival","label":"Выживаемость: C-index и IBS",
-   "x_metric":"c_index","y_metric":"ibs_remain","x_label":"C-index","y_label":"IBS"},
+   "x_metric":"CI","y_metric":"IBS_REMAIN","x_label":"C-index","y_label":"IBS"},
 ]
 
 
 MODELS = [
-  # classification (sklearn)
   {"id":"sklearn.linear_model.LogisticRegression","label":"LogisticRegression","lib":"sklearn","task":"classification"},
   {"id":"sklearn.ensemble.RandomForestClassifier","label":"RandomForestClassifier","lib":"sklearn","task":"classification"},
-
-  # regression (sklearn)
   {"id":"sklearn.ensemble.RandomForestRegressor","label":"RandomForestRegressor","lib":"sklearn","task":"regression"},
-
-  # survival (lifelines)
   {"id":"lifelines.CoxPHFitter","label":"CoxPHFitter","lib":"lifelines","task":"survival"},
   {"id":"lifelines.WeibullAFTFitter","label":"WeibullAFTFitter","lib":"lifelines","task":"survival"},
-
-  # survival (survivors)
-  {"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival"},
+  {"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival", "kwargs": {"criterion": "wilcoxon", "depth": 2, "min_samples_leaf": 0.1, "signif": 0.05, "leaf_model": "base"}},
   {"id":"survivors.ensemble.ParallelBootstrapCRAID","label":"ParallelBootstrapCRAID","lib":"survivors","task":"survival"},
 ]
 
@@ -55,6 +51,14 @@ def import_class(path: str):
     module_name, class_name = path.rsplit(".", 1)
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
+
+def make_raw_model(mcfg, task: str, categ=None):
+    Cls = import_class(mcfg["id"])
+    kwargs = dict(mcfg.get("kwargs") or {})
+    if task == "survival" and categ is not None:
+        kwargs.setdefault("categ", categ)
+    return Cls(**kwargs)
+
 
 def wrap_model(raw_model, task: str):
     if task == "classification":
@@ -80,6 +84,8 @@ async def home(request: Request):
             "plot_json": None,
         },
     )
+
+
 @app.post("/compare", name="compare_models")
 async def compare_models(
     request: Request,
@@ -108,11 +114,26 @@ async def compare_models(
     task = preset["task"]
     xk, yk = preset["x_metric"], preset["y_metric"]
 
-    X, y, features, categ, sch_nan = load_gbsg_dataset()
+    load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
+    if load_fn is None:
+        return templates.TemplateResponse("home.html", {
+            "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
+            "selected": selected, "plot_json": None,
+            "messages": [{"category":"error","text":f"Нет загрузчика датасета: load_{dataset_id}_dataset()"}],
+        })
+    X, y, features, categ, sch_nan = load_fn()
+
     X_tr, X_tst, y_tr, y_tst = train_test_split(X, y, test_size=0.25, random_state=42)
+
     bins = None
     if task == "survival":
         bins = cnt.get_bins(time=y_tr[cnt.TIME_NAME], cens=y_tr[cnt.CENS_NAME])
+
+    ds_cfg = next((d for d in DATASETS if d["id"] == dataset_id), None)
+
+    table_df = None
+    if task == "survival" and ds_cfg is not None and ds_cfg.get("table"):
+        table_df =  load_surv_table(BASE_DIR, ds_cfg)
 
     xs, ys, labels = [], [], []
     errors = []
@@ -123,21 +144,44 @@ async def compare_models(
             continue
 
         try:
-            Cls = import_class(mid)
-            raw = Cls()
-            model = wrap_model(raw, task)
-            model.fit(X_tr, y_tr)
+            vx = None
+            vy = None
 
-            if task == "classification":
-                md = eval_classification_model(model, X_tst, y_tst)
-            elif task == "regression":
-                md = eval_regression_model(model, X_tst, y_tst["time"])
-                print(md)
+            if task == "survival" and table_df is not None:
+                vx = lookup_metric(table_df, mcfg["label"], xk)
+                vy = lookup_metric(table_df, mcfg["label"], yk)
+
+            md = None
+
+            if task == "classification" or task == "regression":
+                Cls = import_class(mid)
+                raw = Cls()
+                model = wrap_model(raw, task)
+                model.fit(X_tr, y_tr)
+
+                if task == "classification":
+                    md = eval_classification_model(model, X_tst, y_tst)
+                else:
+                    md = eval_regression_model(model, X_tst, y_tst["time"])
+
+                vx = md.get(xk)
+                vy = md.get(yk)
+
             else:
-                md = eval_survival_model(model, X_tr, y_tr, X_tst, y_tst, bins=bins)
+                need_calc = (vx is None) or (vy is None)
 
-            vx = md.get(xk)
-            vy = md.get(yk)
+                if need_calc:
+                    raw = make_raw_model(mcfg, task, categ=categ)
+                    model = wrap_model(raw, task)
+                    model.fit(X_tr, y_tr)
+
+                    md = eval_survival_model(model, X_tr, y_tr, X_tst, y_tst, bins=bins)
+
+                    if vx is None:
+                        vx = md.get(xk)
+                    if vy is None:
+                        vy = md.get(yk)
+
             if vx is None or vy is None:
                 errors.append(f"{mcfg['label']}: нет метрик {xk}/{yk}")
                 continue
@@ -173,47 +217,21 @@ async def compare_models(
     })
 
 
-
-
 @app.get("/goal", name="goal_page")
 async def goal_page(request: Request):
-    return templates.TemplateResponse(
-        "goal.html",
-        {
-            "request": request,
-            "messages": [],
-        },
-    )
+    return templates.TemplateResponse("goal.html", {"request": request, "messages": []})
 
 
 @app.get("/link", name="link_page")
 async def link_page(request: Request):
-    return templates.TemplateResponse(
-        "link.html",
-        {
-            "request": request,
-            "messages": [],
-        },
-    )
+    return templates.TemplateResponse("link.html", {"request": request, "messages": []})
 
 
 @app.get("/methodology", name="methodology_page")
 async def methodology_page(request: Request):
-    return templates.TemplateResponse(
-        "methodology.html",
-        {
-            "request": request,
-            "messages": [],
-        },
-    )
+    return templates.TemplateResponse("methodology.html", {"request": request, "messages": []})
 
 
 @app.get("/example", name="example_page")
 async def example_page(request: Request):
-    return templates.TemplateResponse(
-        "example.html",
-        {
-            "request": request,
-            "messages": [],
-        },
-    )
+    return templates.TemplateResponse("example.html", {"request": request, "messages": []})

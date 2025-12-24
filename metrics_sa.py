@@ -49,7 +49,7 @@ def _split_time_event(y) -> Tuple[np.ndarray, np.ndarray]:
     if "event" in names:
         event = y["event"].astype(bool)
     elif "cens" in names:
-        event = (~y["cens"]).astype(bool)
+        event = (y["cens"]).astype(bool)
     else:
         raise ValueError(f"В y нет ни 'event', ни 'cens', имеем поля: {names}")
 
@@ -98,9 +98,6 @@ def eval_classification_model(
 
 # --- метрики регрессии -------------------------------------------------
 def eval_regression(y_true, y_pred) -> Dict[str, float]:
-    """
-    Метрики регрессии. Без C-index (по твоему требованию).
-    """
     y_true = np.asarray(y_true, float)
     y_pred = np.asarray(y_pred, float)
 
@@ -131,20 +128,23 @@ def cindex_survival_model(model, X, y, bins) -> float:
 
 
 def eval_survival_curves(y_train, y_test, pred_sf, bins):
+    bins = np.asarray(bins, float)
+    pred_sf = np.asarray(pred_sf, float)
     return {
-        "ibs_remain": float(ibs_remain(y_train, y_test, pred_sf, bins)),
+        "IBS_REMAIN": float(ibs_remain(y_train, y_test, pred_sf, bins)),
         "auprc": float(auprc(y_train, y_test, pred_sf, bins)),
     }
 
 
 def eval_survival_model(model, X_train, y_train, X_test, y_test, bins):
+    bins = np.asarray(bins, float)
     risk = _get_risk_from_model(model, X_test, bins)
     ci = cindex_survival(y_test, risk)
     S = _get_survival_from_model(model, X_test, bins)
 
     curves = eval_survival_curves(y_train, y_test, S, bins)
 
-    res = {"c_index": ci}
+    res = {"CI": ci}
     res.update(curves)
     return res
 
