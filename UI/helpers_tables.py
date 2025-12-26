@@ -1,39 +1,229 @@
 import pandas as pd
 from pathlib import Path
+import importlib
+from survivors.experiments import grid as exp
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore", message="DataFrame is highly fragmented*")
+
 
 def _norm(s: str) -> str:
     return str(s).strip().lower()
 
-def load_surv_table(base_dir: Path, cfg: dict):
-    rel = cfg.get("table")
-    if not rel:
-        return None
-    p = (base_dir / rel).resolve()
-    if not p.exists():
-        return None
+def import_class(path: str):
+    module_name, class_name = path.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
-    df = pd.read_excel(p)
+def get_surv_table_path(base_dir: Path, dataset_id: str) -> Path:
+    cands = [
+        base_dir / "tables" / f"{dataset_id}.xlsx",
+        base_dir / "tables" / f"{dataset_id.upper()}.xlsx",
+        base_dir / "tables" / f"{dataset_id.lower()}.xlsx",
+    ]
+    for p in cands:
+        if p.exists():
+            return p.resolve()
+    return cands[0].resolve()
+
+def normalize_surv_df(df: pd.DataFrame):
+    if df is None or not isinstance(df, pd.DataFrame):
+        return None
     df = df.rename(columns={c: _norm(c) for c in df.columns})
-
     if "method" not in df.columns:
-        return None
-
+        df["method"] = pd.NA
     df["__method_norm__"] = df["method"].map(_norm)
     return df
 
-def lookup_metric(df, model_label: str, metric_key: str):
+def load_surv_df(table_path: Path):
+    if not table_path.exists():
+        return None
+    df = pd.read_excel(table_path)
+    return normalize_surv_df(df)
+
+def lookup_metric(df: pd.DataFrame, model_label: str, metric_key: str):
     if df is None:
         return None
-
+    if "__method_norm__" not in df.columns:
+        return None
     row = df[df["__method_norm__"] == _norm(model_label)]
     if row.empty:
         return None
-
     col = _norm(metric_key) + "_mean"
     if col not in df.columns:
         return None
-
-    try:
-        return float(row.iloc[0][col])
-    except:
+    v = row.iloc[0].get(col)
+    if v is None or pd.isna(v):
         return None
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+def _ensure_cols(df: pd.DataFrame, cols: list):
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+    return df
+
+def _pick_col(df: pd.DataFrame, *cands: str):
+    cols = {_norm(c): c for c in df.columns}
+    for c in cands:
+        if _norm(c) in cols:
+            return cols[_norm(c)]
+    return None
+
+def _need_col_names(need_metrics: list):
+    return [_norm(mk) + "_mean" for mk in need_metrics]
+
+def supplement_surv_table_missing(
+    base_dir: Path,
+    dataset_id: str,
+    X_tr,
+    y_tr,
+    bins,
+    model_cfgs: list,
+    need_metrics: list,
+):
+    table_path = get_surv_table_path(base_dir, dataset_id)
+    table_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if table_path.exists():
+        df = pd.read_excel(table_path)
+    else:
+        df = pd.DataFrame(columns=["method"])
+
+    df = normalize_surv_df(df)
+
+    need_cols = ["method", "__method_norm__"] + [_norm(mk) + "_mean" for mk in need_metrics]
+    df = _ensure_cols(df, need_cols)
+
+    cfg2missing = {}     
+    all_missing = set()   
+
+    for mcfg in model_cfgs:
+        ml = mcfg["label"]
+        mn = _norm(ml)
+        row = df[df["__method_norm__"] == mn]
+
+        miss = []
+        if row.empty:
+            miss = list(need_metrics)
+        else:
+            for mk in need_metrics:
+                col = _norm(mk) + "_mean"
+                v = row.iloc[0].get(col)
+                if v is None or pd.isna(v):
+                    miss.append(mk)
+
+        if miss:
+            cfg2missing[mn] = miss
+            all_missing.update(miss)
+
+    if not all_missing:
+        out = df.drop(columns=["__method_norm__"], errors="ignore")
+        out.to_excel(table_path, index=False)
+        return table_path
+
+    missing_metrics = list(all_missing)
+
+    experim = exp.Experiments(folds=5, mode="CV+SAMPLE")
+    print(missing_metrics)
+    experim.set_metrics(missing_metrics)
+    experim.add_metric_best(missing_metrics[0])
+
+    for mcfg in model_cfgs:
+        mn = _norm(mcfg["label"])
+        if mn not in cfg2missing:
+            continue
+
+        Est = import_class(mcfg["id"])
+        grid = mcfg.get("param_grid")
+        if not grid:
+            kwargs = mcfg.get("kwargs") or {}
+            grid = {k: [v] for k, v in kwargs.items()}
+
+        experim.add_method(Est, grid)
+
+    experim.run_effective(X_tr, y_tr, verbose=0, stratify_best=[])
+
+    df_best = experim.get_best_by_mode()
+    df_best = df_best.rename(columns={c: _norm(c) for c in df_best.columns})
+
+    method_col = _pick_col(df_best, "method", "model", "estimator", "algo", "name")
+    if method_col is None:
+        df_best["method"] = pd.NA
+        method_col = "method"
+
+    df_best["__method_norm__"] = df_best[method_col].map(_norm)
+
+    for mcfg in model_cfgs:
+        ml = mcfg["label"]
+        mn = _norm(ml)
+
+        if mn not in cfg2missing:
+            continue
+
+        src = df_best[df_best["__method_norm__"] == mn]
+
+        hit = df["__method_norm__"] == mn
+        if hit.any():
+            idx = df[hit].index[0]
+        else:
+            new_row = {"method": ml, "__method_norm__": mn}
+            for mk in need_metrics:
+                new_row[_norm(mk) + "_mean"] = pd.NA
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            idx = df.index[-1]
+
+        if src.empty:
+            continue
+
+        for mk in cfg2missing[mn]:
+            mean_col = _norm(mk) + "_mean"
+            if mean_col not in src.columns:
+                continue
+            v = src.iloc[0][mean_col]
+            if v is None or pd.isna(v):
+                continue
+            df.at[idx, mean_col] = float(v)
+
+    out = df.drop(columns=["__method_norm__"], errors="ignore")
+    out.to_excel(table_path, index=False)
+    return table_path
+
+
+def get_surv_metrics(
+    base_dir: Path,
+    dataset_id: str,
+    X_tr,
+    y_tr,
+    bins,
+    model_cfgs: list,
+    model_label: str,
+    x_metric: str,
+    y_metric: str,
+):
+    table_path = get_surv_table_path(base_dir, dataset_id)
+    df = load_surv_df(table_path)
+
+    vx = lookup_metric(df, model_label, x_metric)
+    vy = lookup_metric(df, model_label, y_metric)
+    if (vx is not None) and (vy is not None):
+        return vx, vy, table_path
+
+    supplement_surv_table_missing(
+        base_dir=base_dir,
+        dataset_id=dataset_id,
+        X_tr=X_tr,
+        y_tr=y_tr,
+        bins=bins,
+        model_cfgs=model_cfgs,
+        need_metrics=[x_metric, y_metric],
+    )
+
+    df = load_surv_df(table_path)
+    vx = lookup_metric(df, model_label, x_metric)
+    vy = lookup_metric(df, model_label, y_metric)
+    return vx, vy, table_path

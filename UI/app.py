@@ -5,12 +5,12 @@ from typing import List, Optional
 import json
 from fastapi import Form
 from sklearn.model_selection import train_test_split
-from survival_wrappers.metrics_sa import eval_classification_model, eval_regression_model, eval_survival_model
+from survival_wrappers.metrics_sa import eval_classification_model, eval_regression_model
 from pathlib import Path
 from survival_wrappers.wrapSA import SAWrapSA, ClassifWrapSA, RegrWrapSA
 import survivors.datasets as ds
 import survivors.constants as cnt
-from survival_wrappers.UI.helpers_tables import  load_surv_table, lookup_metric
+from survival_wrappers.UI.helpers_tables import  get_surv_metrics
 
 
 app = FastAPI()
@@ -20,8 +20,9 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 DATASETS = [
-    {"id": "gbsg", "label": "GBSG", "table": None},
-    {"id": "telco", "label": "Telco", "table": "tables/telco.xlsx"},
+    {"id": "gbsg", "label": "GBSG"},
+    {"id": "telco", "label": "Telco"},
+    {"id": "wuhan", "label": "Wuhan"},
 ]
 
 PRESETS = [
@@ -38,10 +39,14 @@ MODELS = [
   {"id":"sklearn.linear_model.LogisticRegression","label":"LogisticRegression","lib":"sklearn","task":"classification"},
   {"id":"sklearn.ensemble.RandomForestClassifier","label":"RandomForestClassifier","lib":"sklearn","task":"classification"},
   {"id":"sklearn.ensemble.RandomForestRegressor","label":"RandomForestRegressor","lib":"sklearn","task":"regression"},
-  {"id":"lifelines.CoxPHFitter","label":"CoxPHFitter","lib":"lifelines","task":"survival"},
-  {"id":"lifelines.WeibullAFTFitter","label":"WeibullAFTFitter","lib":"lifelines","task":"survival"},
-  {"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival", "kwargs": {"criterion": "wilcoxon", "depth": 2, "min_samples_leaf": 0.1, "signif": 0.05, "leaf_model": "base"}},
+  #{"id":"lifelines.CoxPHFitter","label":"CoxPHFitter","lib":"lifelines","task":"survival"},
+  #{"id":"lifelines.WeibullAFTFitter","label":"WeibullAFTFitter","lib":"lifelines","task":"survival"},
+  #{"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival", "param_grid": {"criterion": "wilcoxon", "depth": 2, "min_samples_leaf": 0.1, "signif": 0.05, "leaf_model": "base"}},
   {"id":"survivors.ensemble.ParallelBootstrapCRAID","label":"ParallelBootstrapCRAID","lib":"survivors","task":"survival"},
+  {"id":"sksurv.linear_model.CoxPHSurvivalAnalysis","label":"CoxPHSurvivalAnalysis","lib":"sksurv","task":"survival", "param_grid": {"alpha":[100, 10, 1, 0.1, 0.01, 0.001],"ties":["breslow"]}},
+  {"id":"sksurv.ensemble.RandomSurvivalForest","label":"RandomSurvivalForest","lib":"sksurv","task":"survival", "param_grid": {"n_estimators":[50],"max_depth":[None,20],"min_samples_leaf":[0.001,0.01,0.1,0.25],"random_state":[123]}},
+  {"id":"sksurv.tree.SurvivalTree","label":"SurvivalTree","lib":"sksurv","task":"survival", "param_grid": {"max_depth":[None,20],"min_samples_leaf":[1, 10, 20],"max_features":[None,"sqrt"],"random_state":[123]}},
+  {"id":"sksurv.ensemble.ComponentwiseGradientBoostingSurvivalAnalysis","label":"ComponentwiseGradientBoostingSurvivalAnalysis","lib":"sksurv","task":"survival", "param_grid": {"loss":["coxph"],"learning_rate":[0.01, 0.05, 0.1, 0.5],"n_estimators":[30,50],"subsample":[0.7, 1.0],"dropout_rate":[0.0, 0.1, 0.5],"random_state":[123]}},
 ]
 
 
@@ -52,12 +57,6 @@ def import_class(path: str):
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
 
-def make_raw_model(mcfg, task: str, categ=None):
-    Cls = import_class(mcfg["id"])
-    kwargs = dict(mcfg.get("kwargs") or {})
-    if task == "survival" and categ is not None:
-        kwargs.setdefault("categ", categ)
-    return Cls(**kwargs)
 
 
 def wrap_model(raw_model, task: str):
@@ -113,7 +112,6 @@ async def compare_models(
 
     task = preset["task"]
     xk, yk = preset["x_metric"], preset["y_metric"]
-
     load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
     if load_fn is None:
         return templates.TemplateResponse("home.html", {
@@ -129,12 +127,6 @@ async def compare_models(
     if task == "survival":
         bins = cnt.get_bins(time=y_tr[cnt.TIME_NAME], cens=y_tr[cnt.CENS_NAME])
 
-    ds_cfg = next((d for d in DATASETS if d["id"] == dataset_id), None)
-
-    table_df = None
-    if task == "survival" and ds_cfg is not None and ds_cfg.get("table"):
-        table_df =  load_surv_table(BASE_DIR, ds_cfg)
-
     xs, ys, labels = [], [], []
     errors = []
 
@@ -146,13 +138,6 @@ async def compare_models(
         try:
             vx = None
             vy = None
-
-            if task == "survival" and table_df is not None:
-                vx = lookup_metric(table_df, mcfg["label"], xk)
-                vy = lookup_metric(table_df, mcfg["label"], yk)
-
-            md = None
-
             if task == "classification" or task == "regression":
                 Cls = import_class(mid)
                 raw = Cls()
@@ -168,20 +153,20 @@ async def compare_models(
                 vy = md.get(yk)
 
             else:
-                need_calc = (vx is None) or (vy is None)
+                surv_cfgs = [next((m for m in MODELS if m["id"] == mid2), None) for mid2 in model_ids]
+                surv_cfgs = [m for m in surv_cfgs if m is not None and m.get("task") == "survival"]
 
-                if need_calc:
-                    raw = make_raw_model(mcfg, task, categ=categ)
-                    model = wrap_model(raw, task)
-                    model.fit(X_tr, y_tr)
-
-                    md = eval_survival_model(model, X_tr, y_tr, X_tst, y_tst, bins=bins)
-
-                    if vx is None:
-                        vx = md.get(xk)
-                    if vy is None:
-                        vy = md.get(yk)
-
+                vx, vy, _ = get_surv_metrics(
+                    base_dir=BASE_DIR,
+                    dataset_id=dataset_id,
+                    X_tr=X,
+                    y_tr=y,
+                    bins=bins,
+                    model_cfgs=surv_cfgs,
+                    model_label=mcfg["label"],
+                    x_metric=xk,
+                    y_metric=yk,
+                )
             if vx is None or vy is None:
                 errors.append(f"{mcfg['label']}: нет метрик {xk}/{yk}")
                 continue
