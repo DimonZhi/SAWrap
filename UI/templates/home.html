@@ -3,142 +3,95 @@
 
 {% block content %}
 <div class="page-header">
-    <h1>Главная</h1>
-    <p class="page-subtitle">Выбери датасет, пресет метрик и набор моделей из sklearn, lifelines и survivors.</p>
+  <h1>Главная</h1>
+  <p class="page-subtitle">Выбери датасет, пресет метрик и набор моделей из sklearn, lifelines и survivors.</p>
 </div>
 
 <form action="{{ url_for('compare_models') }}" method="post" class="grid-2">
-    <section class="card">
-        <h2 style="margin-top:0;font-size:18px;">Данные и пресет метрик</h2>
+  <section class="card">
+    <h2 style="margin-top:0;font-size:18px;">Данные и пресет метрик</h2>
 
-        <label class="field-label">Датасет из survivors</label>
-        <select name="dataset_id" class="input-field">
-            {% for ds in datasets %}
-                <option value="{{ ds.id }}"
-                    {% if selected and selected.dataset_id == ds.id %}selected{% endif %}>
-                    {{ ds.label }}
-                </option>
-            {% endfor %}
-        </select>
+    <label class="field-label">Датасет из survivors</label>
+    <select name="dataset_id" class="input-field">
+      {% for ds in datasets %}
+        <option value="{{ ds.id }}"
+          {% if selected and selected.dataset_id == ds.id %}selected{% endif %}>
+          {{ ds.label }}
+        </option>
+      {% endfor %}
+    </select>
 
-        <label class="field-label" style="margin-top:10px;">Пресет из двух метрик</label>
-        <select name="preset_id" class="input-field">
-            {% for p in presets %}
-                <option value="{{ p.id }}"
-                    {% if selected and selected.preset_id == p.id %}selected{% endif %}>
-                    {{ p.label }}
-                </option>
-            {% endfor %}
-        </select>
-    </section>
+    <label class="field-label" style="margin-top:10px;">Пресет из двух метрик</label>
+    <select name="preset_id" class="input-field">
+      {% for p in presets %}
+        <option value="{{ p.id }}"
+          {% if selected and selected.preset_id == p.id %}selected{% endif %}>
+          {{ p.label }}
+        </option>
+      {% endfor %}
+    </select>
+  </section>
 
-    <section class="card">
-        <h2 style="margin-top:0;font-size:18px;">Модели</h2>
-        <p class="hint">Каждый список раскрывается отдельно. Можно выбрать несколько моделей.</p>
+  <section class="card">
+    <h2 style="margin-top:0;font-size:18px;">Модели</h2>
+    <p class="hint">Каждый список раскрывается отдельно. Можно выбрать несколько моделей.</p>
 
-        <div class="models-dropdown">
-            <button type="button" class="models-dd-btn">
-                Classification <span class="caret">▾</span>
-            </button>
-            <div class="models-dd-menu">
-                {% for m in models if m.task == "classification" %}
-                    <label class="checkbox-row">
-                        <input type="checkbox" name="model_ids" value="{{ m.id }}"
-                            {% if selected and m.id in selected.model_ids %}checked{% endif %}>
-                        <span>{{ m.label }}</span>
-                    </label>
-                {% endfor %}
-            </div>
-        </div>
+    <div class="models-dropdown">
+      <button type="button" class="models-dd-btn">
+        Classification <span class="caret">▾</span>
+      </button>
+      <div class="models-dd-menu">
+        {% for m in models if m.task == "classification" %}
+          <label class="checkbox-row">
+            <input type="checkbox" name="model_ids" value="{{ m.id }}"
+              {% if selected and m.id in selected.model_ids %}checked{% endif %}>
+            <span>{{ m.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
 
-        <div class="models-dropdown">
-            <button type="button" class="models-dd-btn">
-                Regression <span class="caret">▾</span>
-            </button>
-            <div class="models-dd-menu">
-                {% for m in models if m.task == "regression" %}
-                    <label class="checkbox-row">
-                        <input type="checkbox" name="model_ids" value="{{ m.id }}"
-                            {% if selected and m.id in selected.model_ids %}checked{% endif %}>
-                        <span>{{ m.label }}</span>
-                    </label>
-                {% endfor %}
-            </div>
-        </div>
+    <div class="models-dropdown">
+      <button type="button" class="models-dd-btn">
+        Regression <span class="caret">▾</span>
+      </button>
+      <div class="models-dd-menu">
+        {% for m in models if m.task == "regression" %}
+          <label class="checkbox-row">
+            <input type="checkbox" name="model_ids" value="{{ m.id }}"
+              {% if selected and m.id in selected.model_ids %}checked{% endif %}>
+            <span>{{ m.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
 
-        <div class="models-dropdown">
-            <button type="button" class="models-dd-btn">
-                Survival Analisis <span class="caret">▾</span>
-            </button>
-            <div class="models-dd-menu">
-                {% for m in models if m.task == "survival" %}
-                    <label class="checkbox-row">
-                        <input type="checkbox" name="model_ids" value="{{ m.id }}"
-                            {% if selected and m.id in selected.model_ids %}checked{% endif %}>
-                        <span>{{ m.label }}</span>
-                    </label>
-                {% endfor %}
-            </div>
-        </div>
-    </section>
+    <div class="models-dropdown">
+      <button type="button" class="models-dd-btn">
+        Survival Analisis <span class="caret">▾</span>
+      </button>
+      <div class="models-dd-menu">
+        {% for m in models if m.task == "survival" %}
+          <label class="checkbox-row">
+            <input type="checkbox" name="model_ids" value="{{ m.id }}"
+              {% if selected and m.id in selected.model_ids %}checked{% endif %}>
+            <span>{{ m.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
 
-    <section class="card span-2">
-        <button type="submit" class="btn btn-primary">▶ Построить график</button>
-    </section>
+  <section class="card span-2">
+    <button type="submit" class="btn btn-primary">▶ Построить график</button>
+  </section>
 </form>
 
 <section class="card" style="margin-top:16px;">
-    <h2 style="margin-top:0;font-size:18px;">График метрик (Plotly)</h2>
-    <div id="metrics-plot" style="width:100%;height:400px;"></div>
+  <h2 style="margin-top:0;font-size:18px;">График метрик (Plotly)</h2>
+  <div id="metrics-plot" style="width:100%;height:400px;"></div>
 </section>
 
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-<script>
-(function () {
-    // dropdown models
-    document.querySelectorAll('.models-dropdown').forEach((dd) => {
-        const btn = dd.querySelector('.models-dd-btn');
-        btn.addEventListener('click', () => dd.classList.toggle('open'));
-    });
-    document.addEventListener('click', (e) => {
-        document.querySelectorAll('.models-dropdown').forEach((dd) => {
-            if (!dd.contains(e.target)) dd.classList.remove('open');
-        });
-    });
-
-    // plotly
-    {% if plot_json %}
-    const plotData = {{ plot_json | safe }};
-    const trace = {
-        x: plotData.x,
-        y: plotData.y,
-        mode: 'markers+text',
-        text: plotData.labels,
-        textposition: 'top center',
-        marker: { size: 12 }
-    };
-    const layout = {
-        margin: {l: 50, r: 20, t: 10, b: 50},
-        xaxis: {
-            title: plotData.x_metric,
-            range: [0, 1],
-            autorange: "max"
-            },
-        yaxis: {
-            title: plotData.y_metric,
-            range: [0, 1],
-            autorange: "max"
-        }
-};
-
-    Plotly.newPlot('metrics-plot', [trace], layout);
-    {% else %}
-    document.getElementById('metrics-plot').innerHTML =
-        '<div style="color:#9ca3af;font-size:14px;text-align:center;margin-top:150px;">Выбери модели и нажми «Построить график»</div>';
-    {% endif %}
-})();
-</script>
-{% endblock %}
 {% if messages %}
   <div class="card" style="margin-top:12px;">
     {% for m in messages %}
@@ -147,3 +100,140 @@
   </div>
 {% endif %}
 
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(function () {
+  // ---------- models dropdowns (работает всегда) ----------
+  const dds = Array.from(document.querySelectorAll('.models-dropdown'));
+
+  dds.forEach((dd) => {
+    const btn = dd.querySelector('.models-dd-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // закрываем остальные
+      dds.forEach(x => { if (x !== dd) x.classList.remove('open'); });
+
+      // переключаем текущий
+      dd.classList.toggle('open');
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    dds.forEach((dd) => {
+      if (!dd.contains(e.target)) dd.classList.remove('open');
+    });
+  });
+
+  // ---------- plotly (не должен ломать dropdowns) ----------
+  const plotEl = document.getElementById('metrics-plot');
+  const plotData = {{ (plot_data  if plot_data else None) | tojson }};
+  const metricsList = {{ (metrics_list or []) | tojson }};
+
+  if (!plotEl) return;
+
+  if (!plotData) {
+    plotEl.innerHTML =
+      '<div style="color:#9ca3af;font-size:14px;text-align:center;margin-top:150px;">Выбери модели и нажми «Построить график»</div>';
+    return;
+  }
+
+  try {
+    const labels = (plotData.labels || []).map(String);
+    const values = plotData.values || {};
+
+    let xMetric = String(plotData.x_metric || (metricsList[0] || ""));
+    let yMetric = String(plotData.y_metric || (metricsList[1] || metricsList[0] || ""));
+
+    function getXY(metricX, metricY) {
+      const x = [], y = [], t = [];
+      for (const lab of labels) {
+        const row = values[lab] || {};
+        const vx = row[String(metricX).toLowerCase() + "_mean"];
+        const vy = row[String(metricY).toLowerCase() + "_mean"];
+        if (vx === null || vx === undefined || Number.isNaN(vx)) continue;
+        if (vy === null || vy === undefined || Number.isNaN(vy)) continue;
+        x.push(+vx);
+        y.push(+vy);
+        t.push(lab);
+      }
+      return {x, y, t};
+    }
+
+    function makeTrace() {
+      const {x, y, t} = getXY(xMetric, yMetric);
+      return [{
+        x, y,
+        mode: 'markers+text',
+        text: t,
+        textposition: 'top center',
+        marker: { size: 12 }
+      }];
+    }
+    function idxOfMetric(mk) {
+        const s = String(mk || "").toLowerCase();
+        const i = metricsList.findIndex(x => String(x).toLowerCase() === s);
+        return i >= 0 ? i : 0;
+    }
+
+    function makeLayout() {
+      return {
+        margin: {l: 60, r: 20, t: 70, b: 60},
+        xaxis: { title: xMetric, autorange: "max" },
+        yaxis: { title: yMetric, autorange: "max" },
+
+        updatemenus: [
+          {
+            type: "dropdown",
+            x: 0.0, y: 1.18,
+            xanchor: "left", yanchor: "top",
+            direction: "down",
+            showactive: true,
+            active: idxOfMetric(xMetric),
+            buttons: metricsList.map(mk => ({
+              label: "X: " + mk,
+              method: "skip",
+              args: [mk]
+            }))
+          },
+          {
+            type: "dropdown",
+            x: 0.35, y: 1.18,
+            xanchor: "left", yanchor: "top",
+            direction: "down",
+            showactive: true,
+            active: idxOfMetric(yMetric),
+            buttons: metricsList.map(mk => ({
+              label: "Y: " + mk,
+              method: "skip",
+              args: [mk]
+            }))
+          }
+        ]
+      };
+    }
+
+    const config = { responsive: true };
+
+    Plotly.newPlot(plotEl, makeTrace(), makeLayout(), config).then((gd) => {
+        Plotly.react(gd, makeTrace(), makeLayout(), config);
+        gd.on('plotly_buttonclicked', (e) => {
+            const label = String(e.button.label || "");
+            const mk = String((e.button.args && e.button.args[0]) || "");
+            if (label.startsWith("X:")) xMetric = mk;
+            if (label.startsWith("Y:")) yMetric = mk;
+            Plotly.react(gd, makeTrace(), makeLayout(), config);
+      });
+    });
+
+  } catch (err) {
+    console.error("Plotly render error:", err);
+    plotEl.innerHTML =
+      '<div style="color:#ef4444;font-size:14px;text-align:center;margin-top:150px;">Ошибка построения графика. Открой консоль (F12 → Console).</div>';
+  }
+})();
+</script>
+{% endblock %}

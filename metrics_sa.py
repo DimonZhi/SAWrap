@@ -112,7 +112,7 @@ def eval_regression(y_true, y_pred) -> Dict[str, float]:
 
 
 def eval_regression_model(model, X, y_true) -> Dict[str, float]:
-    return eval_regression(y_true, model.predict(X))
+    return eval_regression(y_true, model.predict_time(X))
 
 # --- метрики аналиаз выживаемости -------------------------------------------------
 def cindex_survival(y, risk) -> float:

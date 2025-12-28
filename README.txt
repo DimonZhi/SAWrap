@@ -1,0 +1,1 @@
+скачать в папку и из этой папки python -m uvicorn survival_wrappers.UI.app:app --reload
