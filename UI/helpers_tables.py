@@ -11,8 +11,6 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented*")
 
 
-
-
 def _norm(s: str) -> str:
     return str(s).strip().lower()
 
@@ -143,7 +141,6 @@ def supplement_surv_table_missing(
         if not miss:
             continue
 
-        # 1) гарантируем idx (строка в df под этот метод) СРАЗУ
         hit = (df["__method_norm__"] == mn)
         if hit.any():
             idx = df[hit].index[0]
@@ -188,7 +185,6 @@ def supplement_surv_table_missing(
         df_best = experim.get_best_by_mode()
         df_best = df_best.rename(columns={c: _norm(c) for c in df_best.columns})
 
-        # мы запускали один метод → берём первую строку без матчинга по названию
         if df_best is None or len(df_best) == 0:
             continue
         src = df_best.iloc[[0]]                                                         

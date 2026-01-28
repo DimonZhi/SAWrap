@@ -1,1 +1,3 @@
-скачать в папку и из этой папки python -m uvicorn survival_wrappers.UI.app:app --reload
+создать папку survival_wrappers, клонировать туда это проект
+cd .. 
+python -m uvicorn survival_wrappers.UI.app:app --reload
