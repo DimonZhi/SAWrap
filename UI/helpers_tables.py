@@ -1,11 +1,16 @@
 import pandas as pd
 from pathlib import Path
+import numpy as np
 import importlib
 from survivors.experiments import grid as exp
+from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
+from sklearn.metrics import root_mean_squared_error, r2_score, roc_auc_score, log_loss
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented*")
+
+
 
 
 def _norm(s: str) -> str:
@@ -67,12 +72,10 @@ def _ensure_cols(df: pd.DataFrame, cols: list):
             df[c] = pd.NA
     return df
 
-def _pick_col(df: pd.DataFrame, *cands: str):
-    cols = {_norm(c): c for c in df.columns}
-    for c in cands:
-        if _norm(c) in cols:
-            return cols[_norm(c)]
-    return None
+def find_sf_at_truetime(pred_sf, event_time, bins):
+        idx_pred = np.clip(np.searchsorted(bins, event_time), 0, len(bins) - 1)
+        proba = np.take_along_axis(pred_sf, idx_pred[:, np.newaxis], axis=1).squeeze()
+        return proba
 
 def supplement_surv_table_missing(
     base_dir: Path,
@@ -84,6 +87,14 @@ def supplement_surv_table_missing(
 ):
     table_path = get_surv_table_path(base_dir, dataset_id)
     table_path.parent.mkdir(parents=True, exist_ok=True)
+    #классификация
+    auc_event      = lambda y_tr, y_tst, pred_time, pred_sf, pred_hf, bins: roc_auc_score(y_tst["cens"].astype(int), find_sf_at_truetime(pred_sf, y_tst["time"], bins))
+    log_loss_event = lambda y_tr, y_tst, pred_time, pred_sf, pred_hf, bins: log_loss(y_tst["cens"], find_sf_at_truetime(pred_sf, y_tst["time"], bins))
+    rmse_event     = lambda y_tr, y_tst, pred_time, pred_sf, pred_hf, bins: root_mean_squared_error(y_tst["cens"], find_sf_at_truetime(pred_sf, y_tst["time"], bins))
+
+    #регрессия
+    rmse_exp_time = lambda y_tr, y_tst, pred_time, pred_sf, pred_hf, bins: root_mean_squared_error(y_tst["time"], pred_time)
+    r2_exp_time   = lambda y_tr, y_tst, pred_time, pred_sf, pred_hf, bins: r2_score(y_tst["time"], pred_time)
 
     if table_path.exists():
         df = pd.read_excel(table_path)
@@ -132,7 +143,23 @@ def supplement_surv_table_missing(
         if not miss:
             continue
 
+        # 1) гарантируем idx (строка в df под этот метод) СРАЗУ
+        hit = (df["__method_norm__"] == mn)
+        if hit.any():
+            idx = df[hit].index[0]
+        else:
+            new_row = {"method": ml, "__method_norm__": mn}
+            for mk2 in need_metrics:
+                new_row[_norm(mk2) + "_mean"] = pd.NA
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            idx = df.index[-1]
+
         experim = exp.Experiments(folds=5, mode="CV+SAMPLE")
+        experim.add_new_metric("RMSE_TIME", rmse_exp_time)
+        experim.add_new_metric("R2_TIME", r2_exp_time)
+        experim.add_new_metric("AUC_EVENT", auc_event)
+        experim.add_new_metric("LOGLOSS_EVENT", log_loss_event)
+        experim.add_new_metric("RMSE_EVENT", rmse_event)
         experim.set_metrics(list(miss))
 
         best_metric = miss[0]
@@ -145,33 +172,27 @@ def supplement_surv_table_missing(
         if not grid:
             kwargs = mcfg.get("kwargs") or {}
             grid = {k: [v] for k, v in kwargs.items()}
-        experim.add_method(Est, grid)
+
+        est_obj = Est()
+        t = mcfg.get("task")
+        if t == "survival":
+            method_obj = SAWrapSA(est_obj)
+        elif t == "classification":
+            method_obj = ClassifWrapSA(est_obj)
+        else:
+            method_obj = RegrWrapSA(est_obj)
+        experim.add_method(method_obj, grid)
 
         experim.run_effective(X_tr, y_tr, verbose=0, stratify_best=[])
 
         df_best = experim.get_best_by_mode()
         df_best = df_best.rename(columns={c: _norm(c) for c in df_best.columns})
 
-        method_col = _pick_col(df_best, "method", "model", "estimator", "algo", "name")
-        if method_col is None:
-            df_best["method"] = pd.NA
-            method_col = "method"
-
-        df_best["__method_norm__"] = df_best[method_col].map(_norm)
-        src = df_best[df_best["__method_norm__"] == mn]
-
-        hit = (df["__method_norm__"] == mn)
-        if hit.any():
-            idx = df[hit].index[0]
-        else:
-            new_row = {"method": ml, "__method_norm__": mn}
-            for mk in need_metrics:
-                new_row[_norm(mk) + "_mean"] = pd.NA
-            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-            idx = df.index[-1]
-
-        if src.empty:
+        # мы запускали один метод → берём первую строку без матчинга по названию
+        if df_best is None or len(df_best) == 0:
             continue
+        src = df_best.iloc[[0]]                                                         
+
 
         for mk in miss:
             mean_col = _norm(mk) + "_mean"
@@ -228,6 +249,11 @@ def list_surv_metrics_from_table(base_dir: Path, dataset_id: str):
     table_path = get_surv_table_path(base_dir, dataset_id)
     df = pd.read_excel(table_path)
     df = df.rename(columns={c: _norm(c) for c in df.columns})
-    metric_cols = [c for c in df.columns if c.endswith("_mean")]
-    metric_keys = sorted({c[:-5] for c in metric_cols})
+    metric_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_mean")]
+    metric_keys = []
+    for c in metric_cols:
+        s = pd.to_numeric(df[c], errors="coerce")
+        if s.notna().any():
+            metric_keys.append(c[:-5])
+    metric_keys = sorted(metric_keys)
     return metric_keys, df

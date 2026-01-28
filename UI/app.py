@@ -7,7 +7,7 @@ from fastapi import Form
 from survival_wrappers.metrics_sa import eval_classification_model, eval_regression_model, eval_survival_model
 from sklearn.model_selection import train_test_split
 from pathlib import Path
-from survival_wrappers.wrapSA import SAWrapSA, ClassifWrapSA, RegrWrapSA, get_bins
+from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 import survivors.datasets as ds
 import survivors.constants as cnt
 from survival_wrappers.UI.helpers_tables import list_surv_metrics_from_table, get_surv_metrics
@@ -29,28 +29,78 @@ DATASETS = [
 ]
 
 PRESETS = [
-  {"id":"cls_acc_roc","preset_task":"classification","label":"Классификация: Accuracy и ROC AUC",
-   "x_metric":"accuracy","y_metric":"roc_auc","x_label":"Accuracy","y_label":"ROC AUC"},
+  {"id":"cls_auc_logloss","preset_task":"classification","label":"Классификация: AUC и LogLoss",
+   "x_metric":"AUC_EVENT","y_metric":"LOGLOSS_EVENT","x_label":"AUC(event)","y_label":"LogLoss(event)"},
   {"id":"reg_rmse_r2","preset_task":"regression","label":"Регрессия: RMSE и R2",
-   "x_metric":"rmse","y_metric":"r2","x_label":"RMSE","y_label":"R2"},
+   "x_metric":"RMSE_TIME","y_metric":"R2_TIME","x_label":"RMSE E[T]","y_label":"R2 E[T]"},
   {"id":"surv_ci_ibs","preset_task":"survival","label":"Выживаемость: C-index и IBS",
    "x_metric":"CI","y_metric":"IBS_REMAIN","x_label":"C-index","y_label":"IBS"},
 ]
 
 
+
 MODELS = [
-  {"id":"sklearn.linear_model.LogisticRegression","label":"LogisticRegression","lib":"sklearn","task":"classification"},
-  {"id":"sklearn.ensemble.RandomForestClassifier","label":"RandomForestClassifier","lib":"sklearn","task":"classification"},
-  {"id":"sklearn.ensemble.RandomForestRegressor","label":"RandomForestRegressor","lib":"sklearn","task":"regression"},
-  #{"id":"lifelines.CoxPHFitter","label":"CoxPHFitter","lib":"lifelines","task":"survival"},
-  #{"id":"lifelines.WeibullAFTFitter","label":"WeibullAFTFitter","lib":"lifelines","task":"survival"},
-  #{"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival", "param_grid": {"criterion": "wilcoxon", "depth": 2, "min_samples_leaf": 0.1, "signif": 0.05, "leaf_model": "base"}},
-  {"id":"survivors.ensemble.ParallelBootstrapCRAID","label":"ParallelBootstrapCRAID","lib":"survivors","task":"survival"},
-  {"id":"sksurv.linear_model.CoxPHSurvivalAnalysis","label":"CoxPHSurvivalAnalysis","lib":"sksurv","task":"survival", "param_grid": {"alpha":[100, 10, 1, 0.1, 0.01, 0.001],"ties":["breslow"]}},
-  {"id":"sksurv.ensemble.RandomSurvivalForest","label":"RandomSurvivalForest","lib":"sksurv","task":"survival", "param_grid": {"n_estimators":[50],"max_depth":[None,20],"min_samples_leaf":[0.001,0.01,0.1,0.25],"random_state":[123]}},
-  {"id":"sksurv.tree.SurvivalTree","label":"SurvivalTree","lib":"sksurv","task":"survival", "param_grid": {"max_depth":[None,20],"min_samples_leaf":[1, 10, 20],"max_features":[None,"sqrt"],"random_state":[123]}},
-  {"id":"sksurv.ensemble.ComponentwiseGradientBoostingSurvivalAnalysis","label":"ComponentwiseGradientBoostingSurvivalAnalysis","lib":"sksurv","task":"survival", "param_grid": {"loss":["coxph"],"learning_rate":[0.01, 0.05, 0.1, 0.5],"n_estimators":[30,50],"subsample":[0.7, 1.0],"dropout_rate":[0.0, 0.1, 0.5],"random_state":[123]}},
+  # -------- classification --------
+  {"id":"sklearn.linear_model.LogisticRegression","label":"LogisticRegression","lib":"sklearn","task":"classification",
+   "param_grid":{"penalty":["l2"],"C":[0.01,0.1,1,10],"solver":["liblinear","lbfgs"],"class_weight":[None,"balanced"],"max_iter":[1000]}},
+
+  {"id":"sklearn.svm.SVC","label":"SVC","lib":"sklearn","task":"classification",
+   "param_grid":{}},
+
+  {"id":"sklearn.neighbors.KNeighborsClassifier","label":"KNeighborsClassifier","lib":"sklearn","task":"classification",
+   "param_grid":{"n_neighbors":[5,10,20],"weights":["uniform","distance"]}},
+
+  {"id":"sklearn.tree.DecisionTreeClassifier","label":"DecisionTreeClassifier","lib":"sklearn","task":"classification",
+   "param_grid":{"max_depth":[5,10,20],"min_samples_split":[2,10],"min_samples_leaf":[1,5],"criterion":["gini","entropy"]}},
+
+  {"id":"sklearn.ensemble.RandomForestClassifier","label":"RandomForestClassifier","lib":"sklearn","task":"classification",
+   "param_grid":{"n_estimators":[100,300],"max_depth":[10,30],"min_samples_split":[2,10],"min_samples_leaf":[1,5]}},
+
+  {"id":"sklearn.ensemble.GradientBoostingClassifier","label":"GradientBoostingClassifier","lib":"sklearn","task":"classification",
+   "param_grid":{"n_estimators":[100,300],"learning_rate":[0.05,0.1],"max_depth":[2,3],"subsample":[0.7,1.0]}},
+
+  # -------- regression --------
+  {"id":"sklearn.linear_model.ElasticNet","label":"ElasticNet","lib":"sklearn","task":"regression",
+   "param_grid":{"alpha":[0.001,0.01,0.1],"l1_ratio":[0.2,0.5,0.8],"max_iter":[1000,5000]}},
+
+  {"id":"sklearn.tree.DecisionTreeRegressor","label":"DecisionTreeRegressor","lib":"sklearn","task":"regression",
+   "param_grid":{"max_depth":[5,10,20],"min_samples_split":[2,10],"min_samples_leaf":[1,5],"criterion":["squared_error","friedman_mse"]}},
+
+  {"id":"sklearn.ensemble.RandomForestRegressor","label":"RandomForestRegressor","lib":"sklearn","task":"regression",
+   "param_grid":{"n_estimators":[100,300],"max_depth":[10,30],"min_samples_split":[2,10],"min_samples_leaf":[1,5]}},
+
+  {"id":"sklearn.ensemble.GradientBoostingRegressor","label":"GradientBoostingRegressor","lib":"sklearn","task":"regression",
+   "param_grid":{"n_estimators":[100,300],"learning_rate":[0.05,0.1],"max_depth":[2,3],"subsample":[0.7,1.0]}},
+
+  {"id":"sklearn.svm.SVR","label":"SVR","lib":"sklearn","task":"regression",
+   "param_grid":{"kernel":["linear","rbf"],"C":[0.1,1,10],"epsilon":[0.1,0.2]}},
+
+  {"id":"sklearn.neighbors.KNeighborsRegressor","label":"KNeighborsRegressor","lib":"sklearn","task":"regression",
+   "param_grid":{"n_neighbors":[5,10,20],"weights":["uniform","distance"]}},
+
+  # -------- survival (lifelines / survivors / sksurv) --------
+  {"id":"lifelines.fitters.coxph_fitter.CoxPHFitter","label":"CoxPHFitter","lib":"lifelines","task":"survival",
+   "param_grid":{"penalizer":[0.0,0.01,0.1,1.0]}},
+
+  {"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival",
+   "param_grid":{"criterion":["wilcoxon"],"depth":[2,3,4],"min_samples_leaf":[0.05,0.1],"signif":[0.01,0.05],"leaf_model":["base"]}},
+
+  {"id":"survivors.ensemble.ParallelBootstrapCRAID","label":"ParallelBootstrapCRAID","lib":"survivors","task":"survival",
+   "param_grid":{"n_estimators":[25,50,100],"random_state":[123]}},
+
+  {"id":"sksurv.linear_model.CoxPHSurvivalAnalysis","label":"CoxPHSurvivalAnalysis","lib":"sksurv","task":"survival",
+   "param_grid":{"alpha":[100,10,1,0.1,0.01,0.001],"ties":["breslow"]}},
+
+  {"id":"sksurv.ensemble.RandomSurvivalForest","label":"RandomSurvivalForest","lib":"sksurv","task":"survival",
+   "param_grid":{"n_estimators":[50,100],"max_depth":[None,20],"min_samples_leaf":[0.001,0.01,0.1,0.25],"random_state":[123]}},
+
+  {"id":"sksurv.tree.SurvivalTree","label":"SurvivalTree","lib":"sksurv","task":"survival",
+   "param_grid":{"max_depth":[None,20],"min_samples_leaf":[1,10,20],"max_features":[None,"sqrt"],"random_state":[123]}},
+
+  {"id":"sksurv.ensemble.ComponentwiseGradientBoostingSurvivalAnalysis","label":"ComponentwiseGradientBoostingSurvivalAnalysis","lib":"sksurv","task":"survival",
+   "param_grid":{"loss":["coxph"],"learning_rate":[0.01,0.05,0.1,0.5],"n_estimators":[30,50],"subsample":[0.7,1.0],"dropout_rate":[0.0,0.1,0.5],"random_state":[123]}},
 ]
+
 
 
 import importlib
@@ -145,68 +195,34 @@ async def compare_models(
     metrics_set = set()
     for mid in model_ids:
         mcfg = next((m for m in MODELS if m["id"] == mid), None)
-        task = mcfg["task"]
-        if mcfg is None:
+        cfgs = [next((m for m in MODELS if m["id"] == mid2), None) for mid2 in model_ids]
+        cfgs = [m for m in cfgs if m is not None]
+
+        vx, vy, _ = get_surv_metrics(
+            base_dir=BASE_DIR,
+            dataset_id=dataset_id,
+            X_tr=X,
+            y_tr=y,
+            model_cfgs=cfgs,
+            model_label=mcfg["label"],
+            x_metric=xk,
+            y_metric=yk,
+        )
+
+        metrics_list, df = list_surv_metrics_from_table(BASE_DIR, dataset_id)
+        r = df[df["method"].astype(str) == str(mcfg["label"])]
+        if r.empty:
             continue
+        d = r.iloc[0].to_dict()
 
-        try:
-            if task in ("classification", "regression"):
-                Cls = import_class(mid)
-                raw = Cls()
-                model = wrap_model(raw, task)
-                model.fit(X, y)
-
-                if preset_task == "classification":
-                    md = eval_classification_model(model, X, y)
-                elif preset_task == "regression":
-                    md = eval_regression_model(model, X, y["time"])
-                else:
-                    X_tr, X_tst, y_tr, y_tst = train_test_split(X, y, test_size=0.2, random_state=42)
-                    bins = get_bins(y, 128)
-                    md = eval_survival_model(model, X_tr, y_tr, X_tst, y_tst, bins)
-
-                values_by_label.setdefault(mcfg["label"], {})
-                for k, v in md.items():
-                    if v is None:
-                        continue
-                    try:
-                        fv = float(v)
-                    except Exception:
-                        continue
-                    values_by_label[mcfg["label"]][f"{k}_mean"] = fv
-                    metrics_set.add(k)
-
-                labels.append(mcfg["label"])
-                metrics_list = sorted(metrics_set)
-            else:
-                
-                surv_cfgs = [next((m for m in MODELS if m["id"] == mid2), None) for mid2 in model_ids]
-                surv_cfgs = [m for m in surv_cfgs if m is not None and m.get("task") == "survival"]
-                vx, vy, _ = get_surv_metrics(
-                    base_dir=BASE_DIR,
-                    dataset_id=dataset_id,
-                    X_tr=X,
-                    y_tr=y,
-                    model_cfgs=surv_cfgs,
-                    model_label=mcfg["label"],
-                    x_metric=xk,
-                    y_metric=yk,
-                )
-                metrics_list, df = list_surv_metrics_from_table(BASE_DIR, dataset_id)
-                r = df[df["method"].astype(str) == str(mcfg["label"])]
-                d = r.iloc[0].to_dict()
-                values_by_label.setdefault(mcfg["label"], {})
-                for k, v in d.items():
-                    if isinstance(k, str) and k.endswith("_mean"):
-                        try:
-                            values_by_label[mcfg["label"]][k] = float(v)
-                        except Exception:
-                            pass
-                labels.append(mcfg["label"])
-
-
-        except Exception as e:
-            errors.append(f"{mcfg['label']}: {type(e).__name__}: {e}")
+        values_by_label.setdefault(mcfg["label"], {})
+        for k, v in d.items():
+            if isinstance(k, str) and k.endswith("_mean"):
+                try:
+                    values_by_label[mcfg["label"]][k] = float(v)
+                except Exception:
+                    pass
+        labels.append(mcfg["label"])
 
     if not labels:
         return templates.TemplateResponse("home.html", {
