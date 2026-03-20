@@ -5,8 +5,10 @@ from typing import Optional, Tuple, Union, Sequence, List
 from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 import inspect
+from sklearn.base import clone
+from survivors.external import BaseSAAdapter as SurvivorsBaseSAAdapter
 
-class BaseSAAdapter(ABC):
+class BaseSAAdapter(SurvivorsBaseSAAdapter, ABC):
     @abstractmethod
     def fit(self, X, y, time_col: str = "time", event_col: str = "event"): ...
     @abstractmethod
@@ -19,6 +21,13 @@ class BaseSAAdapter(ABC):
     def predict_time(self,X): ...
     @abstractmethod
     def predict_proba(self, X): ...
+
+    # Compatibility with libraries expecting scikit-survival-style names.
+    def predict_cumulative_hazard_function(self, X, times: Optional[Sequence[float]] = None):
+        return self.predict_hazard_function(X, times)
+
+    def predict(self, X):
+        return self.predict_time(X)
     
     def timeWrap(self, y, time_col="time", event_col="event"):
         if isinstance(y, tuple) and len(y) == 2:
@@ -102,6 +111,113 @@ class ClassifWrapSA(BaseSAAdapter):
     def predict_time(self, X):
         n = len(X) if hasattr(X, "__len__") else self.predict_proba(X).shape[0]
         return np.full(n, np.nan, float)
+    
+class PiecewiseClassifWrapSA(BaseSAAdapter):
+    def __init__(self, model, times: int = 32, start_at_zero: bool = True):
+        self.model = model
+        self.times = times
+        self.start_at_zero = start_at_zero
+        self._bounds: Optional[Tuple[float, float]] = None
+        self.models_: List = []
+        self.bin_edges_: Optional[np.ndarray] = None
+    def fit(self, X, y, time_col: str = "time", event_col: str = "event"):
+        t, e = self.timeWrap(y, time_col, event_col)
+        left = float(np.min(t))
+        right = float(np.max(t))
+        if not np.isfinite(left) or not np.isfinite(right) or left >= right:
+            left = 0.0
+            right = 1.0
+        self._bounds = (left, right)
+        start = 0.0 if self.start_at_zero else left
+        self.bin_edges_ = np.linspace(start, right, self.times)
+        self.models_ = []
+        for j in range(1, len(self.bin_edges_)):
+            a = self.bin_edges_[j - 1]
+            b = self.bin_edges_[j]
+            at_risk = t > a
+            yj = ((e == 1) & (t > a) & (t <= b)).astype(int)
+            if hasattr(X, "iloc"):
+                Xj = X.iloc[at_risk]
+            else:
+                Xj = X[at_risk]
+            yj = yj[at_risk]
+            if len(yj) == 0:
+                self.models_.append(None)
+                continue
+            if np.all(yj == 0):
+                self.models_.append(0.0)
+                continue
+            if np.all(yj == 1):
+                self.models_.append(1.0)
+                continue
+            m = clone(self.model)
+            m.fit(Xj, yj)
+            self.models_.append(m)
+        return self
+    def _predict_interval_proba(self, model, X):
+        if model is None:
+            n = len(X) if hasattr(X, "__len__") else 1
+            return np.zeros(n, float)
+        if isinstance(model, (float, int)):
+            n = len(X) if hasattr(X, "__len__") else 1
+            return np.full(n, float(model), float)
+        return self._get_proba(model, X)
+    def predict_proba(self, X):
+        S, _ = self.predict_survival_function(X)
+        p = 1.0 - S[:, -1]
+        return np.column_stack([1.0 - p, p])
+    def predict_survival_function(self, X, times=None):
+        assert self._bounds is not None, "Call fit() first"
+        assert self.bin_edges_ is not None, "Call fit() first"
+        base_t = self.bin_edges_[1:]
+        H = []
+        for m in self.models_:
+            p = self._predict_interval_proba(m, X)
+            p = np.clip(np.asarray(p, float), 0.0, 1.0)
+            H.append(p)
+        if len(H) == 0:
+            n = len(X) if hasattr(X, "__len__") else 1
+            if times is None:
+                return np.ones((n, 0), float), np.array([], float)
+            t = np.asarray(times, float)
+            return np.ones((n, t.size), float), t
+        H = np.column_stack(H)
+        S_step = np.cumprod(1.0 - H, axis=1)
+        if times is None:
+            return S_step, base_t
+        t = np.asarray(times, float)
+        S = np.ones((H.shape[0], t.size), float)
+        for k, tt in enumerate(t):
+            if tt < base_t[0]:
+                S[:, k] = 1.0
+            else:
+                j = np.searchsorted(base_t, tt, side="left")
+                if j >= S_step.shape[1]:
+                    j = S_step.shape[1] - 1
+                S[:, k] = S_step[:, j]
+        return S, t
+    def predict_hazard_function(self, X, times=None):
+        S, t = self.predict_survival_function(X, times)
+        eps = 1e-12
+        H = -np.log(np.clip(S, eps, 1.0))
+        return H, t
+    def predict_expected_time(self, X, times=None):
+        S, t = self.predict_survival_function(X, times)
+        if t.size == 0:
+            n = len(X) if hasattr(X, "__len__") else 1
+            return np.zeros(n, float)
+        t_full = np.r_[0.0, t]
+        S_full = np.column_stack([np.ones(S.shape[0]), S])
+        return np.trapz(S_full, t_full, axis=1)
+    def predict_time(self, X):
+        S, t = self.predict_survival_function(X)
+        med = np.full(S.shape[0], np.nan, float)
+        for i, row in enumerate(S):
+            j = np.argmax(row <= 0.5)
+            if row[j] <= 0.5:
+                med[i] = t[j]
+        return med
+
 class RegrWrapSA(BaseSAAdapter):
     def __init__(self, model, times: int = 128, start_at_zero: bool = True):
         self.model = model
@@ -360,6 +476,3 @@ def get_bins(y, n_bins: int = 128, start_at_zero: bool = True):
         right = start + 1.0
 
     return np.linspace(start, right, int(n_bins))
-
-
-
