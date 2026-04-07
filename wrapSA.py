@@ -115,6 +115,7 @@ class ClassifWrapSA(BaseSAAdapter):
 class PiecewiseClassifWrapSA(BaseSAAdapter):
     def __init__(self, model, times: int = 32, start_at_zero: bool = True):
         self.model = model
+        self.__name__ = f"PiecewiseClassifWrapSA({model.__class__.__name__}, times={times})"
         self.times = times
         self.start_at_zero = start_at_zero
         self._bounds: Optional[Tuple[float, float]] = None
@@ -141,6 +142,11 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
         if edges.size < 2:
             return np.array([left, max(right, left + 1.0)], float)
         return edges
+
+    def __call__(self, **kwargs):
+        self.model = self.model.__class__(**kwargs)
+        return self
+
     def fit(self, X, y, time_col: str = "time", event_col: str = "event"):
         t, e = self.timeWrap(y, time_col, event_col)
         left = float(np.min(t))
@@ -149,64 +155,82 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
             left = 0.0
             right = 1.0
         self._bounds = (left, right)
+
         self.bin_edges_ = self._build_piecewise_bin_edges(t, self.times, self.start_at_zero)
         self.models_ = []
+
         for j in range(1, len(self.bin_edges_)):
             a = self.bin_edges_[j - 1]
             b = self.bin_edges_[j]
+
             at_risk = t > a
             yj = ((e == 1) & (t > a) & (t <= b)).astype(int)
+
             if hasattr(X, "iloc"):
                 Xj = X.iloc[at_risk]
             else:
                 Xj = X[at_risk]
             yj = yj[at_risk]
+
             if len(yj) == 0:
                 self.models_.append(None)
                 continue
+
             if np.all(yj == 0):
                 self.models_.append(0.0)
                 continue
+
             if np.all(yj == 1):
                 self.models_.append(1.0)
                 continue
+
             m = clone(self.model)
             m.fit(Xj, yj)
             self.models_.append(m)
+
         return self
+
     def _predict_interval_proba(self, model, X):
+        n = len(X) if hasattr(X, "__len__") else 1
         if model is None:
-            n = len(X) if hasattr(X, "__len__") else 1
             return np.zeros(n, float)
         if isinstance(model, (float, int)):
-            n = len(X) if hasattr(X, "__len__") else 1
             return np.full(n, float(model), float)
         return self._get_proba(model, X)
+
     def predict_proba(self, X):
         S, _ = self.predict_survival_function(X)
         p = 1.0 - S[:, -1]
         return np.column_stack([1.0 - p, p])
+
     def predict_survival_function(self, X, times=None):
         assert self._bounds is not None, "Call fit() first"
         assert self.bin_edges_ is not None, "Call fit() first"
+
         base_t = self.bin_edges_[1:]
-        H = []
+        hazards = []
+
         for m in self.models_:
             p = self._predict_interval_proba(m, X)
             p = np.clip(np.asarray(p, float), 0.0, 1.0)
-            H.append(p)
-        if len(H) == 0:
+            hazards.append(p)
+
+        if len(hazards) == 0:
             n = len(X) if hasattr(X, "__len__") else 1
             if times is None:
                 return np.ones((n, 0), float), np.array([], float)
             t = np.asarray(times, float)
             return np.ones((n, t.size), float), t
-        H = np.column_stack(H)
-        S_step = np.cumprod(1.0 - H, axis=1)
+
+        hazards = np.column_stack(hazards)
+        S_step = np.cumprod(1.0 - hazards, axis=1)
+
         if times is None:
             return S_step, base_t
+
         t = np.asarray(times, float)
-        S = np.ones((H.shape[0], t.size), float)
+        S = np.ones((S_step.shape[0], t.size), float)
+
         for k, tt in enumerate(t):
             if tt < base_t[0]:
                 S[:, k] = 1.0
@@ -215,12 +239,15 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
                 if j >= S_step.shape[1]:
                     j = S_step.shape[1] - 1
                 S[:, k] = S_step[:, j]
+
         return S, t
+
     def predict_hazard_function(self, X, times=None):
         S, t = self.predict_survival_function(X, times)
         eps = 1e-12
         H = -np.log(np.clip(S, eps, 1.0))
         return H, t
+
     def predict_expected_time(self, X, times=None):
         S, t = self.predict_survival_function(X, times)
         if t.size == 0:
@@ -229,6 +256,7 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
         t_full = np.r_[0.0, t]
         S_full = np.column_stack([np.ones(S.shape[0]), S])
         return np.trapz(S_full, t_full, axis=1)
+
     def predict_time(self, X):
         S, t = self.predict_survival_function(X)
         med = np.full(S.shape[0], np.nan, float)
