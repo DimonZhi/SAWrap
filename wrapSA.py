@@ -120,6 +120,27 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
         self._bounds: Optional[Tuple[float, float]] = None
         self.models_: List = []
         self.bin_edges_: Optional[np.ndarray] = None
+
+    @staticmethod
+    def _build_piecewise_bin_edges(t, times: int, start_at_zero: bool) -> np.ndarray:
+        t = np.asarray(t, float)
+        t = t[np.isfinite(t)]
+        if t.size == 0:
+            return np.array([0.0, 1.0], float)
+
+        left = 0.0 if start_at_zero else float(np.min(t))
+        right = float(np.max(t))
+        n_edges = max(int(times), 2)
+        if right <= left:
+            return np.array([left, left + 1.0], float)
+
+        edges = np.quantile(t, np.linspace(0.0, 1.0, n_edges)).astype(float)
+        edges[0] = left
+        edges[-1] = right
+        edges = np.unique(edges)
+        if edges.size < 2:
+            return np.array([left, max(right, left + 1.0)], float)
+        return edges
     def fit(self, X, y, time_col: str = "time", event_col: str = "event"):
         t, e = self.timeWrap(y, time_col, event_col)
         left = float(np.min(t))
@@ -128,8 +149,7 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
             left = 0.0
             right = 1.0
         self._bounds = (left, right)
-        start = 0.0 if self.start_at_zero else left
-        self.bin_edges_ = np.linspace(start, right, self.times)
+        self.bin_edges_ = self._build_piecewise_bin_edges(t, self.times, self.start_at_zero)
         self.models_ = []
         for j in range(1, len(self.bin_edges_)):
             a = self.bin_edges_[j - 1]
