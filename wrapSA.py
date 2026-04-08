@@ -107,7 +107,7 @@ class ClassifWrapSA(BaseSAAdapter):
         return H, t
     def predict_expected_time(self, X, times=None):
         S, t = self.predict_survival_function(X, times)
-        return np.trapz(S, t, axis=1)
+        return np.trapezoid(S, t, axis=1)
     def predict_time(self, X):
         n = len(X) if hasattr(X, "__len__") else self.predict_proba(X).shape[0]
         return np.full(n, np.nan, float)
@@ -255,8 +255,8 @@ class PiecewiseClassifWrapSA(BaseSAAdapter):
             return np.zeros(n, float)
         t_full = np.r_[0.0, t]
         S_full = np.column_stack([np.ones(S.shape[0]), S])
-        return np.trapz(S_full, t_full, axis=1)
-
+        integrate = getattr(np, "trapezoid", np.trapz)
+        return integrate(S_full, t_full, axis=1)
     def predict_time(self, X):
         S, t = self.predict_survival_function(X)
         med = np.full(S.shape[0], np.nan, float)
@@ -302,7 +302,7 @@ class RegrWrapSA(BaseSAAdapter):
         return H, t
     def predict_expected_time(self, X, times=None):
         S, t = self.predict_survival_function(X, times)
-        return np.trapz(S, t, axis=1)
+        return np.trapezoid(S, t, axis=1)
     def predict_proba(self, X):
         S, _ = self.predict_survival_function(X)
         p = 1.0 - S[:, -1]
@@ -457,7 +457,7 @@ class SAWrapSA(BaseSAAdapter):
         return H, t
     def predict_expected_time(self, X, times=None):
         S, t = self.predict_survival_function(X, times)
-        return np.trapz(S, t, axis=1)
+        return np.trapezoid(S, t, axis=1)
     def predict_time(self, X):
         S, t = self.predict_survival_function(X)
         med = np.full(S.shape[0], np.nan, float)

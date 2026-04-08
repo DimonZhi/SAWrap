@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Лидерборд · SAWrapSA{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Лидерборд</h1>
+    <p class="page-subtitle">Общий рейтинг методов по всем задачам.</p>
+</div>
+
+<section class="card leaderboard-card">
+    <div class="section-heading">
+        <div>
+            <h2>Общий leaderboard</h2>
+            <p>Источник: <code>UI/tables/leaderboards_by_task.xlsx</code>, лист <code>OVERALL_ALL</code>.</p>
+        </div>
+    </div>
+
+    {% if leaderboard_rows %}
+    <div class="leaderboard-table-wrap">
+        <table class="leaderboard-table">
+            <thead>
+                <tr>
+                    <th>Место</th>
+                    <th>Метод</th>
+                    <!-- <th>Задача</th> -->
+                    <th>Датасеты</th>
+                    <!-- <th>Avg Rank Sum</th> -->
+                    <th>Avg Position</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in leaderboard_rows %}
+                <tr{% if row.is_top_three %} class="is-top-row"{% endif %}>
+                    <td>{{ row.position if row.position is not none else "—" }}</td>
+                    <td>{{ row.method }}</td>
+                    <!-- <td>{{ row.task }}</td> -->
+                    <td>{{ row.datasets if row.datasets is not none else "—" }}</td>
+                    <!-- <td>{{ row.avg_rank_sum }}</td> -->
+                    <td>{{ row.avg_position }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Не удалось загрузить общий leaderboard.</p>
+    {% endif %}
+</section>
+
+<section class="card leaderboard-card">
+    <div class="section-heading">
+        <div>
+            <h2>Графики из UI/images</h2>
+        </div>
+    </div>
+
+    {% if notebook_figures %}
+    <div class="leaderboard-figures">
+        {% for figure in notebook_figures %}
+        <figure class="leaderboard-figure" style="margin:0;width:100%;max-width:100%;overflow:hidden;">
+            <img
+                src="{{ figure.src }}"
+                alt="{{ figure.title }}"
+                style="display:block;width:100%;max-width:100%;height:auto;margin:0 auto;"
+            >
+        </figure>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Не удалось найти изображения в <code>UI/images</code>.</p>
+    {% endif %}
+</section>
+{% endblock %}

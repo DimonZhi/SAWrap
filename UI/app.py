@@ -3,29 +3,51 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import List, Optional
 import json
+import os
 from fastapi import Form
-from survival_wrappers.metrics_sa import eval_classification_model, eval_regression_model, eval_survival_model
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 import survivors.datasets as ds
 import survivors.constants as cnt
-from survival_wrappers.UI.helpers_tables import list_surv_metrics_from_table, get_surv_metrics
+from ..metrics_sa import eval_classification_model, eval_regression_model, eval_survival_model
+from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics
+from .helpers_leaderboard import load_leaderboard_images, load_overall_leaderboard_rows
 
 
-app = FastAPI()
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_root_path(name: str = "SAWRAP_ROOT_PATH") -> str:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return ""
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    return raw.rstrip("/")
+
+
+DISABLE_MISSING_RECALC = _env_flag("SAWRAP_SKIP_MISSING_RECALC", default=False)
+ROOT_PATH = _env_root_path()
+
+
+app = FastAPI(root_path=ROOT_PATH)
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/images", StaticFiles(directory=BASE_DIR / "images"), name="images")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 DATASETS = [
+    {"id": "actg", "label": "ACTG"},
     {"id": "gbsg", "label": "GBSG"},
-    {"id": "telco", "label": "Telco"},
     {"id": "pbc", "label": "PBC"},
     {"id": "rott2", "label": "Rott2"},
     {"id": "smarto", "label": "Smarto"},
-    {"id": "support2", "label": "Support2"},
 ]
 
 PRESETS = [
@@ -44,9 +66,6 @@ MODELS = [
   {"id":"sklearn.linear_model.LogisticRegression","label":"LogisticRegression","lib":"sklearn","task":"classification",
    "param_grid":{"penalty":["l2"],"C":[0.01,0.1,1,10],"solver":["liblinear","lbfgs"],"class_weight":[None,"balanced"],"max_iter":[1000]}},
 
-  {"id":"sklearn.svm.SVC","label":"SVC","lib":"sklearn","task":"classification",
-   "param_grid":{}},
-
   {"id":"sklearn.neighbors.KNeighborsClassifier","label":"KNeighborsClassifier","lib":"sklearn","task":"classification",
    "param_grid":{"n_neighbors":[5,10,20],"weights":["uniform","distance"]}},
 
@@ -58,6 +77,9 @@ MODELS = [
 
   {"id":"sklearn.ensemble.GradientBoostingClassifier","label":"GradientBoostingClassifier","lib":"sklearn","task":"classification",
    "param_grid":{"n_estimators":[100,300],"learning_rate":[0.05,0.1],"max_depth":[2,3],"subsample":[0.7,1.0]}},
+
+  {"id":"sklearn.svm.SVC","label":"SVC","lib":"sklearn","task":"classification",
+   "param_grid":{}},
 
   # -------- regression --------
   {"id":"sklearn.linear_model.ElasticNet","label":"ElasticNet","lib":"sklearn","task":"regression",
@@ -79,14 +101,8 @@ MODELS = [
    "param_grid":{"n_neighbors":[5,10,20],"weights":["uniform","distance"]}},
 
   # -------- survival (lifelines / survivors / sksurv) --------
-  {"id":"lifelines.fitters.coxph_fitter.CoxPHFitter","label":"CoxPHFitter","lib":"lifelines","task":"survival",
-   "param_grid":{"penalizer":[0.0,0.01,0.1,1.0]}},
-
-  {"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival",
-   "param_grid":{"criterion":["wilcoxon"],"depth":[2,3,4],"min_samples_leaf":[0.05,0.1],"signif":[0.01,0.05],"leaf_model":["base"]}},
-
-  {"id":"survivors.ensemble.ParallelBootstrapCRAID","label":"ParallelBootstrapCRAID","lib":"survivors","task":"survival",
-   "param_grid":{"n_estimators":[25,50,100],"random_state":[123]}},
+  {"id":"lifelines.fitters.kaplan_meier_fitter.KaplanMeierFitter","label":"KaplanMeierFitter","lib":"lifelines","task":"survival",
+   "param_grid":{}},
 
   {"id":"sksurv.linear_model.CoxPHSurvivalAnalysis","label":"CoxPHSurvivalAnalysis","lib":"sksurv","task":"survival",
    "param_grid":{"alpha":[100,10,1,0.1,0.01,0.001],"ties":["breslow"]}},
@@ -97,8 +113,14 @@ MODELS = [
   {"id":"sksurv.tree.SurvivalTree","label":"SurvivalTree","lib":"sksurv","task":"survival",
    "param_grid":{"max_depth":[None,20],"min_samples_leaf":[1,10,20],"max_features":[None,"sqrt"],"random_state":[123]}},
 
-  {"id":"sksurv.ensemble.ComponentwiseGradientBoostingSurvivalAnalysis","label":"ComponentwiseGradientBoostingSurvivalAnalysis","lib":"sksurv","task":"survival",
+  {"id":"sksurv.ensemble.GradientBoostingSurvivalAnalysis","label":"GradientBoostingSurvivalAnalysis","lib":"sksurv","task":"survival",
    "param_grid":{"loss":["coxph"],"learning_rate":[0.01,0.05,0.1,0.5],"n_estimators":[30,50],"subsample":[0.7,1.0],"dropout_rate":[0.0,0.1,0.5],"random_state":[123]}},
+
+  {"id":"survivors.tree.CRAID","label":"CRAID","lib":"survivors","task":"survival",
+   "param_grid":{"criterion":["wilcoxon"],"depth":[2,3,4],"min_samples_leaf":[0.05,0.1],"signif":[0.01,0.05],"leaf_model":["base"]}},
+
+  {"id":"survivors.ensemble.ParallelBootstrapCRAID","label":"ParallelBootstrapCRAID","lib":"survivors","task":"survival",
+   "param_grid":{"n_estimators":[25,50,100],"random_state":[123]}},
 ]
 
 
@@ -125,6 +147,7 @@ def wrap_model(raw_model, task: str):
 @app.get("/", name="home")
 async def home(request: Request):
     return templates.TemplateResponse(
+        request,
         "home.html",
         {
             "request": request,
@@ -150,9 +173,8 @@ async def compare_models(
 ):
     model_ids = model_ids or []
     preset = next((p for p in PRESETS if p["id"] == preset_id), None)
-    preset_task = preset["preset_task"]
-    xk = x_metric or preset["x_metric"]
-    yk = y_metric or preset["y_metric"]
+    xk = x_metric or (preset["x_metric"] if preset else None)
+    yk = y_metric or (preset["y_metric"] if preset else None)
     selected = {
         "dataset_id": dataset_id,
         "preset_id": preset_id,
@@ -163,7 +185,7 @@ async def compare_models(
 
     
     if preset is None:
-        return templates.TemplateResponse("home.html", {
+        return templates.TemplateResponse(request, "home.html", {
             "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
             "selected": selected, "plot_json": None,
             "messages": [{"category":"error","text":"Пресет не найден"}],  
@@ -171,48 +193,67 @@ async def compare_models(
         })
 
     if not model_ids:
-        return templates.TemplateResponse("home.html", {
+        return templates.TemplateResponse(request, "home.html", {
             "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
             "selected": selected, "plot_json": None,
             "messages": [{"category":"error","text":"Выбери хотя бы одну модель"}], 
             "metrics_list": [],
         })
 
+    allow_recompute = not DISABLE_MISSING_RECALC
+    selected_cfgs = [m for m in MODELS if m["id"] in model_ids]
+    X = y = None
 
-    load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
-    if load_fn is None:
-        return templates.TemplateResponse("home.html", {
-            "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
-            "selected": selected, "plot_json": None,
-            "messages": [{"category":"error","text":f"Нет загрузчика датасета: load_{dataset_id}_dataset()"}],
-            "metrics_list": [],
-        })
-    X, y, features, categ, sch_nan = load_fn()
+    if allow_recompute:
+        load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
+        if load_fn is None:
+            return templates.TemplateResponse(request, "home.html", {
+                "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
+                "selected": selected, "plot_json": None,
+                "messages": [{"category":"error","text":f"Нет загрузчика датасета: load_{dataset_id}_dataset()"}],
+                "metrics_list": [],
+            })
+        X, y, features, categ, sch_nan = load_fn()
+
     errors = []
     metrics_list = []
     labels = []
     values_by_label = {}
-    metrics_set = set()
-    for mid in model_ids:
-        mcfg = next((m for m in MODELS if m["id"] == mid), None)
-        cfgs = [next((m for m in MODELS if m["id"] == mid2), None) for mid2 in model_ids]
-        cfgs = [m for m in cfgs if m is not None]
+    for mcfg in selected_cfgs:
 
         vx, vy, _ = get_surv_metrics(
             base_dir=BASE_DIR,
             dataset_id=dataset_id,
             X_tr=X,
             y_tr=y,
-            model_cfgs=cfgs,
+            model_cfgs=selected_cfgs,
             model_label=mcfg["label"],
             x_metric=xk,
             y_metric=yk,
+            allow_recompute=allow_recompute,
         )
 
         metrics_list, df = list_surv_metrics_from_table(BASE_DIR, dataset_id)
         r = df[df["method"].astype(str) == str(mcfg["label"])]
         if r.empty:
+            msg = f"{mcfg['label']}: нет строки в таблице {dataset_id}.xlsx"
+            if not allow_recompute:
+                msg += " и автопересчёт отключён"
+            errors.append(msg)
             continue
+
+        missing_metrics = []
+        if vx is None:
+            missing_metrics.append(xk)
+        if vy is None and str(yk).lower() != str(xk).lower():
+            missing_metrics.append(yk)
+        if missing_metrics:
+            msg = f"{mcfg['label']}: отсутствуют метрики {', '.join(missing_metrics)}"
+            if not allow_recompute:
+                msg += " и автопересчёт отключён"
+            errors.append(msg)
+            continue
+
         d = r.iloc[0].to_dict()
 
         values_by_label.setdefault(mcfg["label"], {})
@@ -225,13 +266,12 @@ async def compare_models(
         labels.append(mcfg["label"])
 
     if not labels:
-        return templates.TemplateResponse("home.html", {
+        return templates.TemplateResponse(request, "home.html", {
             "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
             "selected": selected, "plot_json": None,
             "messages": [{"category":"error","text":"Не построено ни одной точки: " + (" | ".join(errors[:3]) if errors else "")}],
             "metrics_list": [],
         })
-    print(values_by_label)
     plot_data = {
         "labels": labels,
         "metrics": metrics_list,        
@@ -242,7 +282,7 @@ async def compare_models(
 
     msgs = [{"category":"error","text":" | ".join(errors[:3])}] if errors else []
 
-    return templates.TemplateResponse("home.html", {
+    return templates.TemplateResponse(request, "home.html", {
         "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
         "selected": selected, "plot_data": plot_data,
         "messages": msgs, "metrics_list": metrics_list,
@@ -251,19 +291,38 @@ async def compare_models(
 
 @app.get("/goal", name="goal_page")
 async def goal_page(request: Request):
-    return templates.TemplateResponse("goal.html", {"request": request, "messages": []})
+    return templates.TemplateResponse(request, "goal.html", {"request": request, "messages": []})
 
 
 @app.get("/link", name="link_page")
 async def link_page(request: Request):
-    return templates.TemplateResponse("link.html", {"request": request, "messages": []})
+    return templates.TemplateResponse(request, "link.html", {"request": request, "messages": []})
 
 
 @app.get("/methodology", name="methodology_page")
 async def methodology_page(request: Request):
-    return templates.TemplateResponse("methodology.html", {"request": request, "messages": []})
+    return templates.TemplateResponse(request, "methodology.html", {"request": request, "messages": []})
 
 
 @app.get("/example", name="example_page")
 async def example_page(request: Request):
-    return templates.TemplateResponse("example.html", {"request": request, "messages": []})
+    return templates.TemplateResponse(request, "example.html", {"request": request, "messages": []})
+
+
+@app.get("/leaderboard", name="leaderboard_page")
+async def leaderboard_page(request: Request):
+    leaderboard_rows = load_overall_leaderboard_rows(BASE_DIR / "tables" / "leaderboards_by_task.xlsx")
+    notebook_figures = load_leaderboard_images(BASE_DIR / "images", limit=3)
+    top_methods = leaderboard_rows[:3]
+
+    return templates.TemplateResponse(
+        request,
+        "leaderboard.html",
+        {
+            "request": request,
+            "messages": [],
+            "leaderboard_rows": leaderboard_rows,
+            "top_methods": top_methods,
+            "notebook_figures": notebook_figures,
+        },
+    )

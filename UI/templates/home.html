@@ -5,14 +5,14 @@
 {% block content %}
 <div class="page-header">
   <h1>Главная</h1>
-  <p class="page-subtitle">Выбери датасет, пресет метрик и набор моделей из sklearn, lifelines и survivors.</p>
+  <p class="page-subtitle">Выбери датасет и модели, которые есть в таблицах ACTG, GBSG, PBC, Rott2 и Smarto.</p>
 </div>
 
 <form action="{{ url_for('compare_models') }}" method="post" class="grid-2">
   <section class="card">
     <h2 style="margin-top:0;font-size:18px;">Данные и пресет метрик</h2>
 
-    <label class="field-label">Датасет из survivors</label>
+    <label class="field-label">Датасет из таблиц</label>
     <select name="dataset_id" class="input-field">
       {% for ds in datasets %}
         <option value="{{ ds.id }}"
@@ -69,7 +69,7 @@
 
     <div class="models-dropdown">
       <button type="button" class="models-dd-btn">
-        Survival Analisis <span class="caret">▾</span>
+        Survival <span class="caret">▾</span>
       </button>
       <div class="models-dd-menu">
         {% for m in models if m.task == "survival" %}
@@ -90,7 +90,17 @@
 
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-top:0;font-size:18px;">График метрик (Plotly)</h2>
-  <div id="metrics-plot" style="width:100%;height:400px;"></div>
+  <div class="plot-toolbar" id="plot-toolbar">
+    <label class="plot-control">
+      <span>X-метрика</span>
+      <select id="plot-x-select" class="plot-select"></select>
+    </label>
+    <label class="plot-control">
+      <span>Y-метрика</span>
+      <select id="plot-y-select" class="plot-select"></select>
+    </label>
+  </div>
+  <div id="metrics-plot" style="width:100%;height:460px;"></div>
 </section>
 
 {% if messages %}
@@ -134,20 +144,25 @@ function arrow(mk){
     });
   });
 
-  // ---------- plotly (не должен ломать dropdowns) ----------
+  // ---------- plotly ----------
   const plotEl = document.getElementById('metrics-plot');
+  const plotToolbar = document.getElementById('plot-toolbar');
+  const xSelect = document.getElementById('plot-x-select');
+  const ySelect = document.getElementById('plot-y-select');
   const plotData = {{ (plot_data  if plot_data else None) | tojson }};
   const metricsList = {{ (metrics_list or []) | tojson }};
 
-  if (!plotEl) return;
+  if (!plotEl || !plotToolbar || !xSelect || !ySelect) return;
 
   if (!plotData) {
+    plotToolbar.style.display = 'none';
     plotEl.innerHTML =
       '<div style="color:#9ca3af;font-size:14px;text-align:center;margin-top:150px;">Выбери модели и нажми «Построить график»</div>';
     return;
   }
 
   try {
+    plotToolbar.style.display = 'grid';
     const labels = (plotData.labels || []).map(String);
     const values = plotData.values || {};
 
@@ -179,60 +194,46 @@ function arrow(mk){
         marker: { size: 12 }
       }];
     }
-    function idxOfMetric(mk) {
-        const s = String(mk || "").toLowerCase();
-        const i = metricsList.findIndex(x => String(x).toLowerCase() === s);
-        return i >= 0 ? i : 0;
+
+    function fillMetricSelect(selectEl, selectedMetric, axisLabel) {
+      selectEl.innerHTML = '';
+      metricsList.forEach((mk) => {
+        const option = document.createElement('option');
+        option.value = mk;
+        option.textContent = `${axisLabel}: ${mk} ${arrow(mk)}`;
+        option.selected = String(mk).toLowerCase() === String(selectedMetric).toLowerCase();
+        selectEl.appendChild(option);
+      });
     }
 
     function makeLayout() {
       return {
-        margin: {l: 60, r: 20, t: 70, b: 60},
+        margin: {l: 60, r: 20, t: 30, b: 60},
         xaxis: { title: xMetric, autorange: "max" },
         yaxis: { title: yMetric, autorange: "max" },
-
-        updatemenus: [
-          {
-            type: "dropdown",
-            x: 0.0, y: 1.18,
-            xanchor: "left", yanchor: "top",
-            direction: "down",
-            showactive: true,
-            active: idxOfMetric(xMetric),
-            buttons: metricsList.map(mk => ({
-              label: "X: " + mk + " " + arrow(mk),
-              method: "skip",
-              args: [mk]
-            }))
-          },
-          {
-            type: "dropdown",
-            x: 0.35, y: 1.18,
-            xanchor: "left", yanchor: "top",
-            direction: "down",
-            showactive: true,
-            active: idxOfMetric(yMetric),
-            buttons: metricsList.map(mk => ({
-              label: "Y: " + mk + " " + arrow(mk),
-              method: "skip",
-              args: [mk]
-            }))
-          }
-        ]
       };
     }
 
     const config = { responsive: true };
+    fillMetricSelect(xSelect, xMetric, 'X');
+    fillMetricSelect(ySelect, yMetric, 'Y');
 
     Plotly.newPlot(plotEl, makeTrace(), makeLayout(), config).then((gd) => {
-        Plotly.react(gd, makeTrace(), makeLayout(), config);
-        gd.on('plotly_buttonclicked', (e) => {
-            const label = String(e.button.label || "");
-            const mk = String((e.button.args && e.button.args[0]) || "");
-            if (label.startsWith("X:")) xMetric = mk;
-            if (label.startsWith("Y:")) yMetric = mk;
+        function rerender() {
             Plotly.react(gd, makeTrace(), makeLayout(), config);
-      });
+        }
+
+        xSelect.addEventListener('change', () => {
+            xMetric = xSelect.value;
+            rerender();
+        });
+
+        ySelect.addEventListener('change', () => {
+            yMetric = ySelect.value;
+            rerender();
+        });
+
+        rerender();
     });
 
   } catch (err) {

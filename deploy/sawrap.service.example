@@ -1,0 +1,42 @@
+[Unit]
+Description=SAWrap FastAPI service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+
+# Parent directory that contains the "survival_wrappers" package directory.
+WorkingDirectory=/srv
+
+Environment=PYTHONUNBUFFERED=1
+Environment=SAWRAP_SKIP_MISSING_RECALC=1
+# Uncomment if you publish the app under a path like /sawrap
+# Environment=SAWRAP_ROOT_PATH=/sawrap
+
+# Keep BLAS / NumPy / sklearn from eating the whole server.
+Environment=OMP_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=NUMEXPR_NUM_THREADS=1
+
+# Adjust the venv path if needed.
+ExecStart=/srv/.venv/bin/python -m uvicorn survival_wrappers.UI.app:app --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers
+
+Restart=always
+RestartSec=5
+
+# Resource limits so this service does not hurt the other project.
+CPUQuota=50%
+MemoryMax=1G
+TasksMax=128
+Nice=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

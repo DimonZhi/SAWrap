@@ -123,6 +123,9 @@ body {
     max-width: 1100px;
     margin: 0 auto;
     padding: 80px 16px 24px; /* отступ сверху, чтобы не залезать под шапку */
+    width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
 }
 
 /* Карточки и заголовки */
@@ -186,13 +189,20 @@ body {
     font-size: 14px;
     font-weight: 500;
 }
-.input {
+.input,
+.input-field,
+.plot-select {
     border-radius: 6px;
     border: 1px solid #d1d5db;
     padding: 6px 10px;
     font-size: 14px;
+    background: #ffffff;
 }
 .full {
+    width: 100%;
+}
+.input-field,
+.plot-select {
     width: 100%;
 }
 .models-group {
@@ -220,6 +230,24 @@ body {
     margin-top: 6px;
     font-size: 12px;
     color: #6b7280;
+}
+.plot-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.plot-control {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.plot-control span {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
 }
 .btn {
     border: none;
@@ -292,4 +320,156 @@ body {
 .caret {
     font-size: 11px;
     opacity: 0.7;
+}
+
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.section-heading h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.section-heading p {
+    margin: 6px 0 0;
+    color: #6b7280;
+}
+
+.leaderboard-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.leaderboard-summary-card {
+    background: linear-gradient(135deg, #111827 0%, #1f3b73 100%);
+    color: #f9fafb;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+
+.leaderboard-summary-rank {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 46px;
+    height: 46px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.leaderboard-summary-body h2 {
+    margin: 14px 0 6px;
+    font-size: 20px;
+}
+
+.leaderboard-summary-body p {
+    margin: 0;
+    color: rgba(249, 250, 251, 0.82);
+}
+
+.leaderboard-card {
+    margin-bottom: 16px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.leaderboard-table-wrap {
+    overflow-x: auto;
+}
+
+.leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 640px;
+}
+
+.leaderboard-table th,
+.leaderboard-table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    font-size: 14px;
+}
+
+.leaderboard-table th {
+    color: #6b7280;
+    font-weight: 600;
+}
+
+.leaderboard-table .is-top-row {
+    background: #f8fbff;
+}
+
+.leaderboard-figures {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-x: clip;
+}
+
+.leaderboard-figure {
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f8fafc;
+    box-sizing: border-box;
+}
+
+.leaderboard-figure img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+    border-radius: 8px;
+    background: #ffffff;
+    margin: 0 auto;
+    box-sizing: border-box;
+}
+
+.leaderboard-figure figcaption {
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.leaderboard-figure strong {
+    font-size: 15px;
+}
+
+.leaderboard-figure span,
+.empty-state {
+    color: #6b7280;
+}
+
+@media (max-width: 880px) {
+    .plot-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .leaderboard-summary {
+        grid-template-columns: 1fr;
+    }
 }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>{% block title %}SAWrapSA{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="{{ url_for('static', path='css/styles.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260408c" rel="stylesheet">
 </head>
 <body>
 <header class="topbar">
@@ -26,6 +26,9 @@
                     </a>
                     <a href="{{ url_for('example_page') }}" class="topmenu-item">
                         Пример
+                    </a>
+                    <a href="{{ url_for('leaderboard_page') }}" class="topmenu-item">
+                        Лидерборд
                     </a>
                 </div>
             </details>

@@ -213,6 +213,7 @@ def get_surv_metrics(
     model_label: str,
     x_metric: str,
     y_metric: str,
+    allow_recompute: bool = True,
 ):
     table_path = get_surv_table_path(base_dir, dataset_id)
     df = load_surv_df(table_path)
@@ -227,6 +228,8 @@ def get_surv_metrics(
         need.append(x_metric)
     if vy is None and _norm(y_metric) != _norm(x_metric):
         need.append(y_metric)
+    if (not allow_recompute) or (not need) or (X_tr is None) or (y_tr is None) or (not model_cfgs):
+        return vx, vy, table_path
     supplement_surv_table_missing(
         base_dir=base_dir,
         dataset_id=dataset_id,
@@ -243,6 +246,8 @@ def get_surv_metrics(
 
 def list_surv_metrics_from_table(base_dir: Path, dataset_id: str):
     table_path = get_surv_table_path(base_dir, dataset_id)
+    if not table_path.exists():
+        return [], pd.DataFrame(columns=["method"])
     df = pd.read_excel(table_path)
     df = df.rename(columns={c: _norm(c) for c in df.columns})
     metric_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_mean")]

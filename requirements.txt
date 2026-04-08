@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+openpyxl
+
+lifelines
+scikit-survival
+survivors
