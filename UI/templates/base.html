@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>{% block title %}SAWrapSA{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260408c" rel="stylesheet">
+    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260418c" rel="stylesheet">
 </head>
 <body>
 <header class="topbar">
@@ -12,7 +12,7 @@
         <div class="topbar-left">
             <details class="topmenu">
                 <summary class="topmenu-summary">
-                    Overtview
+                    Overview
                 </summary>
                 <div class="topmenu-dropdown">
                     <a href="{{ url_for('goal_page') }}" class="topmenu-item">
@@ -24,9 +24,11 @@
                     <a href="{{ url_for('methodology_page') }}" class="topmenu-item">
                         Методология разработки
                     </a>
+                    <!--
                     <a href="{{ url_for('example_page') }}" class="topmenu-item">
                         Пример
                     </a>
+                    -->
                     <a href="{{ url_for('leaderboard_page') }}" class="topmenu-item">
                         Лидерборд
                     </a>
@@ -56,5 +58,51 @@
 
     {% block content %}{% endblock %}
 </main>
+<script>
+(() => {
+    const SCREEN_PADDING = 12;
+    const MAX_DROPDOWN_WIDTH = 280;
+    const MIN_DROPDOWN_WIDTH = 210;
+    const menus = Array.from(document.querySelectorAll(".topmenu"));
+
+    function positionMenu(menu) {
+        const dropdown = menu.querySelector(".topmenu-dropdown");
+        const summary = menu.querySelector(".topmenu-summary");
+        if (!dropdown || !summary) return;
+
+        const rect = summary.getBoundingClientRect();
+        const naturalWidth = Math.max(MIN_DROPDOWN_WIDTH, Math.min(MAX_DROPDOWN_WIDTH, dropdown.scrollWidth));
+        const desiredWidth = Math.min(naturalWidth, window.innerWidth - SCREEN_PADDING * 2);
+        const maxLeft = Math.max(SCREEN_PADDING, window.innerWidth - desiredWidth - SCREEN_PADDING);
+        const left = Math.min(Math.max(SCREEN_PADDING, rect.left), maxLeft);
+        const top = Math.round(rect.bottom + 8);
+
+        dropdown.style.position = "fixed";
+        dropdown.style.left = `${left}px`;
+        dropdown.style.top = `${top}px`;
+        dropdown.style.right = "auto";
+        dropdown.style.width = `${desiredWidth}px`;
+    }
+
+    menus.forEach((menu) => {
+        menu.addEventListener("toggle", () => {
+            if (menu.open) {
+                requestAnimationFrame(() => positionMenu(menu));
+            }
+        });
+    });
+
+    const repositionOpenMenus = () => {
+        menus.forEach((menu) => {
+            if (menu.open) {
+                positionMenu(menu);
+            }
+        });
+    };
+
+    window.addEventListener("resize", repositionOpenMenus);
+    window.addEventListener("orientationchange", repositionOpenMenus);
+})();
+</script>
 </body>
 </html>

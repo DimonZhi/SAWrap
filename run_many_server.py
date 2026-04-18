@@ -1,7 +1,11 @@
+import argparse
+import warnings
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import freeze_support
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import warnings
-from pathlib import Path
 
 from sklearn.metrics import root_mean_squared_error, r2_score, roc_auc_score, log_loss
 from scipy.stats import spearmanr
@@ -26,14 +30,14 @@ from survivors.ensemble import ParallelBootstrapCRAID
 warnings.filterwarnings("ignore")
 
 DATASETS = {
-    "framingham": lambda: ds_other.load_Framingham_dataset(),
-    "actg": lambda: ds_other.load_actg_dataset(),
-    "flchain": lambda: ds_other.load_flchain_dataset(),
-    "gbsg": lambda: ds_other.load_gbsg_dataset(),
-    "rott2": lambda: ds_other.load_rott2_dataset(),
-    "smarto": lambda: ds_other.load_smarto_dataset(),
+    #"framingham": lambda: ds_other.load_Framingham_dataset(),
+    #"actg": lambda: ds_other.load_actg_dataset(),
+    ##"flchain": lambda: ds_other.load_flchain_dataset(),
+    #"gbsg": lambda: ds_other.load_gbsg_dataset(),
+    #"rott2": lambda: ds_other.load_rott2_dataset(),
+    #"smarto": lambda: ds_other.load_smarto_dataset(),
     "support2": lambda: ds_other.load_support2_dataset(),
-    "wuhan": lambda: ds_other.load_wuhan_dataset(invert_death=False),
+    ##"wuhan": lambda: ds_other.load_wuhan_dataset(invert_death=False),
 }
 
 def find_sf_at_truetime(pred_sf, event_time, bins):
@@ -167,13 +171,16 @@ def build_experiment(categ):
 OUT_DIR = Path(__file__).resolve().parent / "results"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-for dataset_name, loader in DATASETS.items():
+def run_dataset(dataset_name):
+    loader = DATASETS[dataset_name]
     print(f"\n===== {dataset_name} =====", flush=True)
     experim = None
+    success = False
     try:
         X, y, features, categ, _ = loader()
         experim = build_experiment(categ)
         experim.run_effective(X, y, verbose=1, stratify_best=[])
+        success = True
     except Exception as e:
         print("[ERROR]", dataset_name, repr(e), flush=True)
     finally:
@@ -184,4 +191,72 @@ for dataset_name, loader in DATASETS.items():
                 df_results.to_excel(out, index=False)
                 print("saved", out, flush=True)
             except Exception as e:
+                success = False
                 print("[ERROR] save failed", dataset_name, repr(e), flush=True)
+    return dataset_name, success
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run survival experiments across datasets.")
+    parser.add_argument(
+        "-p",
+        "--processes",
+        type=int,
+        default=1,
+        help="Number of worker processes to use.",
+    )
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        dest="datasets",
+        action="append",
+        choices=sorted(DATASETS),
+        help="Limit the run to a specific dataset. Repeat the flag to pass several datasets.",
+    )
+    args = parser.parse_args()
+    if args.processes < 1:
+        parser.error("--processes must be at least 1")
+    return args
+
+
+def main():
+    args = parse_args()
+    dataset_names = args.datasets or list(DATASETS)
+    max_workers = min(args.processes, len(dataset_names))
+    failed = []
+
+    if max_workers == 1:
+        for dataset_name in dataset_names:
+            _, success = run_dataset(dataset_name)
+            if not success:
+                failed.append(dataset_name)
+        return 1 if failed else 0
+
+    print(
+        f"Running {len(dataset_names)} datasets with {max_workers} processes",
+        flush=True,
+    )
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_dataset = {
+            executor.submit(run_dataset, dataset_name): dataset_name
+            for dataset_name in dataset_names
+        }
+        for future in as_completed(future_to_dataset):
+            dataset_name = future_to_dataset[future]
+            try:
+                _, success = future.result()
+            except Exception as e:
+                success = False
+                print("[ERROR]", dataset_name, repr(e), flush=True)
+            if not success:
+                failed.append(dataset_name)
+
+    if failed:
+        print("[DONE WITH ERRORS]", ", ".join(sorted(set(failed))), flush=True)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    freeze_support()
+    raise SystemExit(main())

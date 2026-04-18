@@ -5,7 +5,7 @@
 {% block content %}
 <div class="page-header">
   <h1>Главная</h1>
-  <p class="page-subtitle">Выбери датасет и модели, которые есть в таблицах ACTG, GBSG, PBC, Rott2 и Smarto.</p>
+  <p class="page-subtitle">Выбери датасет и модели, которые есть в таблицах ACTG, GBSG, PBC, Rott2, Smarto, Framingham и Support2.</p>
 </div>
 
 <form action="{{ url_for('compare_models') }}" method="post" class="grid-2">
@@ -42,6 +42,9 @@
         Classification <span class="caret">▾</span>
       </button>
       <div class="models-dd-menu">
+        <div class="models-dd-actions">
+          <button type="button" class="models-select-all">Выбрать все</button>
+        </div>
         {% for m in models if m.task == "classification" %}
           <label class="checkbox-row">
             <input type="checkbox" name="model_ids" value="{{ m.id }}"
@@ -57,6 +60,9 @@
         Regression <span class="caret">▾</span>
       </button>
       <div class="models-dd-menu">
+        <div class="models-dd-actions">
+          <button type="button" class="models-select-all">Выбрать все</button>
+        </div>
         {% for m in models if m.task == "regression" %}
           <label class="checkbox-row">
             <input type="checkbox" name="model_ids" value="{{ m.id }}"
@@ -72,6 +78,9 @@
         Survival <span class="caret">▾</span>
       </button>
       <div class="models-dd-menu">
+        <div class="models-dd-actions">
+          <button type="button" class="models-select-all">Выбрать все</button>
+        </div>
         {% for m in models if m.task == "survival" %}
           <label class="checkbox-row">
             <input type="checkbox" name="model_ids" value="{{ m.id }}"
@@ -113,10 +122,48 @@
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
-function arrow(mk){
-  const up = new Set(["ci","c_index","auc","roc_auc","auc_event","r2","r2_time","r2_exp_time","accuracy","precision","recall","f1"]);
-  const k = String(mk||"").toLowerCase();
-  return up.has(k) ? "↑" : "↓";
+function arrow(metricKey) {
+  const higherBetter = new Set([
+    "accuracy",
+    "auc",
+    "auc_event",
+    "auprc",
+    "c_index",
+    "ci",
+    "f1",
+    "precision",
+    "r2",
+    "r2_exp_time",
+    "r2_time",
+    "recall",
+    "roc_auc",
+    "spearman",
+    "spearman_time"
+  ]);
+  const lowerBetter = new Set([
+    "brier",
+    "ibs",
+    "ibs_remain",
+    "log_loss",
+    "logloss",
+    "logloss_event",
+    "mae",
+    "mape",
+    "mape_time",
+    "medape",
+    "medape_time",
+    "mse",
+    "rmse",
+    "rmse_event",
+    "rmse_exp_time",
+    "rmse_time",
+    "rmsle",
+    "rmsle_time"
+  ]);
+  const k = String(metricKey || "").trim().toLowerCase();
+  if (higherBetter.has(k)) return "↑";
+  if (lowerBetter.has(k)) return "↓";
+  return "";
 }
 (function () {
   // ---------- models dropdowns (работает всегда) ----------
@@ -141,6 +188,43 @@ function arrow(mk){
   document.addEventListener('click', (e) => {
     dds.forEach((dd) => {
       if (!dd.contains(e.target)) dd.classList.remove('open');
+    });
+  });
+
+  function syncSelectAllButton(btn) {
+    const menu = btn.closest('.models-dd-menu');
+    if (!menu) return;
+    const checkboxes = Array.from(menu.querySelectorAll('input[name="model_ids"]'));
+    if (!checkboxes.length) return;
+    const allChecked = checkboxes.every((checkbox) => checkbox.checked);
+    btn.textContent = allChecked ? 'Снять все' : 'Выбрать все';
+    btn.dataset.mode = allChecked ? 'clear' : 'select';
+  }
+
+  const selectAllButtons = Array.from(document.querySelectorAll('.models-select-all'));
+  selectAllButtons.forEach((btn) => {
+    syncSelectAllButton(btn);
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const menu = btn.closest('.models-dd-menu');
+      if (!menu) return;
+      const checkboxes = Array.from(menu.querySelectorAll('input[name="model_ids"]'));
+      if (!checkboxes.length) return;
+
+      const shouldSelect = btn.dataset.mode !== 'clear';
+      checkboxes.forEach((checkbox) => {
+        checkbox.checked = shouldSelect;
+      });
+      syncSelectAllButton(btn);
+    });
+
+    const menu = btn.closest('.models-dd-menu');
+    if (!menu) return;
+    const checkboxes = Array.from(menu.querySelectorAll('input[name="model_ids"]'));
+    checkboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', () => syncSelectAllButton(btn));
     });
   });
 
@@ -200,7 +284,8 @@ function arrow(mk){
       metricsList.forEach((mk) => {
         const option = document.createElement('option');
         option.value = mk;
-        option.textContent = `${axisLabel}: ${mk} ${arrow(mk)}`;
+        const metricArrow = arrow(mk);
+        option.textContent = metricArrow ? `${axisLabel}: ${mk} ${metricArrow}` : `${axisLabel}: ${mk}`;
         option.selected = String(mk).toLowerCase() === String(selectedMetric).toLowerCase();
         selectEl.appendChild(option);
       });

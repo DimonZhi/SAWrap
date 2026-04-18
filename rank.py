@@ -1,14 +1,15 @@
 import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 
 FILES = [
-    #"framingham.xlsx",
+    "framingham.xlsx",
     "gbsg.xlsx",
     "rott2.xlsx",
     "smarto.xlsx",
     "pbc.xlsx",
-    #"support2.xlsx",
+    "support2.xlsx",
     "actg.xlsx"
 ]
 
@@ -186,37 +187,69 @@ def aggregate_overall(per_dataset_tables):
         g.insert(0, "Task", sheet_label)
         return g.reset_index(drop=True)
 
+    def overall_all_by_task_medians():
+        task_cols = {
+            "Classification_Median": "classification_position",
+            "Regression_Median": "regression_position",
+            "Survival_Median": "survival_position",
+        }
+        present = {out_col: src_col for out_col, src_col in task_cols.items() if src_col in long.columns}
+        if not present:
+            return None
+
+        g = long.groupby("Method", as_index=False).agg(
+            Datasets=("Dataset", "nunique"),
+        )
+
+        for out_col, src_col in present.items():
+            med = long.groupby("Method")[src_col].median().reset_index(name=out_col)
+            g = g.merge(med, on="Method", how="left")
+
+        median_cols = list(present.keys())
+        g["Mean_Task_Median"] = g[median_cols].mean(axis=1, skipna=True)
+
+        # Keep legacy column names for the site/exports, but fill them with the new score.
+        g["Avg_RankSum"] = g["Mean_Task_Median"]
+        g["Avg_Position"] = g["Mean_Task_Median"]
+
+        g = g.sort_values(["Mean_Task_Median", "Method"], ascending=[True, True])
+        g["Overall_position"] = np.arange(1, len(g) + 1)
+        g.insert(0, "Task", "ALL")
+        return g.reset_index(drop=True)
+
     cls_overall = overall_table("classification_rank_sum", "classification_position", "CLASSIFICATION")
     reg_overall = overall_table("regression_rank_sum", "regression_position", "REGRESSION")
     surv_overall = overall_table("survival_rank_sum", "survival_position", "SURVIVAL")
-    all_overall = overall_table("overall_rank_sum", "overall_position", "ALL")
+    all_overall = overall_all_by_task_medians()
 
     return long, cls_overall, reg_overall, surv_overall, all_overall
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = Path(__file__).resolve().parent
+    tables_dir = script_dir / "UI" / "tables"
 
-    paths = [os.path.join(script_dir, f) for f in FILES]
+    paths = [tables_dir / f for f in FILES]
 
     print("Script dir:", script_dir)
+    print("Tables dir:", tables_dir)
     print("Looking for files:")
     for p in paths:
-        print(" ", os.path.basename(p), "|", "OK" if os.path.exists(p) else "MISSING")
+        print(" ", p.name, "|", "OK" if p.exists() else "MISSING")
 
     per_dataset = {}
     diagnostics = []
 
     for path in paths:
-        ds = os.path.splitext(os.path.basename(path))[0]
+        ds = path.stem
 
-        if not os.path.exists(path):
-            diagnostics.append({"Dataset": ds, "Status": "missing_file", "Path": path})
+        if not path.exists():
+            diagnostics.append({"Dataset": ds, "Status": "missing_file", "Path": str(path)})
             continue
 
         try:
             df = pd.read_excel(path)
         except Exception as e:
-            diagnostics.append({"Dataset": ds, "Status": "read_error", "Path": path, "Error": str(e)})
+            diagnostics.append({"Dataset": ds, "Status": "read_error", "Path": str(path), "Error": str(e)})
             continue
 
         try:
@@ -225,7 +258,7 @@ def main():
             diag["Status"] = "ok"
             diagnostics.append(diag)
         except Exception as e:
-            diagnostics.append({"Dataset": ds, "Status": "process_error", "Path": path, "Error": str(e)})
+            diagnostics.append({"Dataset": ds, "Status": "process_error", "Path": str(path), "Error": str(e)})
 
     diag_df = pd.DataFrame(diagnostics)
 
@@ -236,7 +269,7 @@ def main():
 
     long, cls_overall, reg_overall, surv_overall, all_overall = aggregate_overall(per_dataset)
 
-    out_path = os.path.join(script_dir, OUTPUT_EXCEL)
+    out_path = tables_dir / OUTPUT_EXCEL
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         diag_df.to_excel(writer, sheet_name="DIAGNOSTICS", index=False)
         long.to_excel(writer, sheet_name="LONG_PER_DATASET", index=False)

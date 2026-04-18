@@ -4,9 +4,39 @@
 {% block content %}
 <div class="page-header">
     <h1>Методология проекта</h1>
-    <p class="page-subtitle">Пупупу</p>
+    <p class="page-subtitle">Архитектура системы, основные компоненты и используемые технологии</p>
 </div>
-<div class="card">
-    <p>Pascal, Кумир</p>
-</div>
+
+<section class="card" style="margin-bottom:16px;">
+    <p style="margin:0; line-height:1.65;">
+        Проект <strong>SAWrap</strong> реализован как веб-ориентированная система для сравнения моделей
+        классификации, регрессии и анализа выживаемости. Методология проекта основана на разделении
+        пользовательского интерфейса, вычислительного модуля и слоя хранения результатов, что позволяет
+        обеспечить воспроизводимость экспериментов, удобный доступ к результатам через сайт и простоту
+        развёртывания на сервере.
+    </p>
+</section>
+
+<section class="card" style="margin-bottom:16px;">
+    <h2 style="margin:0 0 12px; font-size:18px;">Компоненты системы</h2>
+    <ul style="margin:0; padding-left:20px; line-height:1.8;">
+        <li>
+            <strong>GitHub-репозиторий</strong> с исходным кодом проекта и конфигурацией деплоя:
+            <a href="https://github.com/DimonZhi/SAWrap" target="_blank" rel="noopener noreferrer">github.com/DimonZhi/SAWrap</a>
+        </li>
+        <li><strong>Веб-сайт на FastAPI</strong> для взаимодействия пользователя с системой и визуализации результатов.</li>
+        <li><strong>Вычислительный модуль на Python</strong> для запуска экспериментов, расчёта метрик и сравнения моделей.</li>
+        <li><strong>Хранение предрассчитанных результатов</strong> в <code>xlsx</code>-таблицах для ускорения работы интерфейса и повторного использования результатов.</li>
+    </ul>
+</section>
+
+<section class="card">
+    <h2 style="margin:0 0 12px; font-size:18px;">Используемые технологии</h2>
+    <ul style="margin:0; padding-left:20px; line-height:1.8;">
+        <li><strong>Backend и интерфейс:</strong> <code>Python</code>, <code>FastAPI</code>, <code>Jinja2</code>, <code>Uvicorn</code>.</li>
+        <li><strong>Машинное обучение и survival analysis:</strong> <code>scikit-learn</code>, <code>lifelines</code>, <code>scikit-survival</code>, <code>survivors</code>.</li>
+        <li><strong>Обработка данных и визуализация:</strong> <code>Pandas</code>, <code>NumPy</code>, <code>SciPy</code>, <code>Plotly</code>.</li>
+        <li><strong>Инфраструктура и публикация:</strong> <code>GitHub</code>, <code>Docker</code>, <code>Nginx</code>.</li>
+    </ul>
+</section>
 {% endblock %}

@@ -48,6 +48,9 @@ DATASETS = [
     {"id": "pbc", "label": "PBC"},
     {"id": "rott2", "label": "Rott2"},
     {"id": "smarto", "label": "Smarto"},
+    {"id": "framingham", "label": "Framingham"},
+    {"id": "support2", "label": "Support2"},
+
 ]
 
 PRESETS = [
@@ -56,7 +59,7 @@ PRESETS = [
   {"id":"reg_rmse_r2","preset_task":"regression","label":"Регрессия: RMSE и R2",
    "x_metric":"RMSE_TIME","y_metric":"R2_TIME","x_label":"RMSE E[T]","y_label":"R2 E[T]"},
   {"id":"surv_ci_ibs","preset_task":"survival","label":"Выживаемость: C-index и IBS",
-   "x_metric":"CI","y_metric":"IBS_REMAIN","x_label":"C-index","y_label":"IBS"},
+   "x_metric":"CI","y_metric":"IBS","x_label":"C-index","y_label":"IBS"},
 ]
 
 
