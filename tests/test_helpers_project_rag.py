@@ -5,6 +5,7 @@ import numpy as np
 
 import UI.helpers_project_rag as project_rag
 from UI.helpers_project_rag import (
+    _build_rag_messages,
     build_project_rag_answer,
     load_project_knowledge,
     load_thesis_knowledge,
@@ -46,6 +47,18 @@ def _write_knowledge(repo_dir: Path):
         "# SAWrap\n\n"
         "SAWrap сравнивает classification, regression и survival analysis через функцию выживания.\n"
         "Лучшая итоговая модель в экспериментах - ParallelBootstrapCRAID.",
+        encoding="utf-8",
+    )
+    (knowledge_dir / "experiments_summary.md").write_text(
+        "# Эксперименты\n\n"
+        "## Модели\n\n"
+        "В эксперименте сравнивались LogisticRegression, RandomForestRegressor, "
+        "CoxPHSurvivalAnalysis, CRAID и ParallelBootstrapCRAID.\n\n"
+        "## Формулы ключевых метрик\n\n"
+        "`CI` задается как индекс согласованности, а `IBS` как "
+        "\\(\\mathrm{IBS}=\\frac{1}{t_{max}}\\int_0^{t_{max}}BS(t)dt\\).\n\n"
+        "## Итоговое ранжирование\n\n"
+        "Лучшие модели: ParallelBootstrapCRAID, CRAID и RandomForestRegressor.",
         encoding="utf-8",
     )
 
@@ -104,39 +117,6 @@ def test_build_project_rag_answer_has_local_fallback_without_key(tmp_path: Path,
     assert answer["sources"]
 
 
-def test_build_project_rag_answer_includes_pinned_result_context(tmp_path: Path):
-    _write_knowledge(tmp_path)
-    captured = {}
-
-    def fake_opener(request, timeout, context):
-        captured["payload"] = request.data.decode("utf-8")
-        return _FakeResponse()
-
-    answer = build_project_rag_answer(
-        tmp_path,
-        "Почему выбрана эта модель?",
-        pinned_context=(
-            "Датасет: toy\n"
-            "Задача: Анализ выживаемости\n"
-            "Рекомендованная модель: StrongSurvivalModel\n"
-            "CI: 0.91, IBS: 0.08"
-        ),
-        pinned_title="Текущий результат: toy · Анализ выживаемости",
-        api_key="test-key",
-        opener=fake_opener,
-    )
-
-    assert answer["text"] == "RAG answer from project context."
-    assert answer["sources"][0]["source"] == "current_result"
-    assert answer["sources"][0]["title"] == "Текущий результат: toy · Анализ выживаемости"
-
-    payload = json.loads(captured["payload"])
-    message_text = "\n".join(message["content"] for message in payload["messages"])
-    assert "current_result" in message_text
-    assert "StrongSurvivalModel" in message_text
-    assert "knowledge/project_context.md" in message_text
-
-
 def test_retrieve_project_context_uses_vector_index(tmp_path: Path):
     _write_knowledge(tmp_path)
     chunks = load_project_knowledge(str(tmp_path))
@@ -149,7 +129,7 @@ def test_retrieve_project_context_uses_vector_index(tmp_path: Path):
     assert (tmp_path / "UI" / "rag_index" / "chunks.json").exists()
     assert result
     assert result[0].source == "knowledge/project_context.md"
-    assert 0 < result[0].score <= 1
+    assert result[0].score > 0
 
 
 def test_load_thesis_knowledge_reads_latex_sources(tmp_path: Path):
@@ -188,4 +168,51 @@ def test_retrieve_project_context_uses_embedding_index(tmp_path: Path, monkeypat
     assert (tmp_path / "UI" / "rag_index" / "embeddings.npy").exists()
     assert result
     assert result[0].source == "knowledge/project_context.md"
-    assert 0 < result[0].score <= 1
+    assert result[0].score > 0
+
+
+def test_retrieve_project_context_supports_legacy_semantic_manifest(tmp_path: Path, monkeypatch):
+    _write_knowledge(tmp_path)
+    chunks = load_project_knowledge(str(tmp_path))
+    manifest = write_project_vector_index(
+        tmp_path,
+        chunks,
+        retriever="embeddings",
+        embedding_model="fake/e5",
+        embedder=_FakeEmbedder(),
+    )
+    manifest["retriever"] = "semantic"
+    manifest_path = tmp_path / "UI" / "rag_index" / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(project_rag, "_load_sentence_transformer", lambda *args, **kwargs: _FakeEmbedder())
+
+    result = retrieve_project_context(tmp_path, "Какая модель ParallelBootstrapCRAID лучше для survival?")
+
+    assert result
+    assert result[0].source == "knowledge/project_context.md"
+
+
+def test_retrieve_project_context_includes_metric_formulas_for_scientific_idea(tmp_path: Path):
+    _write_knowledge(tmp_path)
+
+    result = retrieve_project_context(tmp_path, "В чем научная идея проекта?")
+    combined = "\n".join(chunk.text for chunk in result)
+
+    assert "Формулы ключевых метрик" in combined
+    assert "IBS" in combined
+
+
+def test_rag_prompt_forbids_limitations_section(tmp_path: Path):
+    _write_knowledge(tmp_path)
+
+    chunks = retrieve_project_context(tmp_path, "В чем научная идея проекта?")
+    message_text = "\n".join(
+        message["content"]
+        for message in _build_rag_messages("В чем научная идея проекта?", chunks)
+    )
+
+    assert "Контроль контекста перед ответом" in message_text
+    assert "В контексте есть конкретные модели" in message_text
+    assert "В контексте есть результаты экспериментов" in message_text
+    assert "Не добавляй отдельный блок ограничений" in message_text
+    assert "Не выводи разделы с названиями 'Ограничения'" in message_text

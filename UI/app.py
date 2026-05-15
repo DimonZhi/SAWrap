@@ -11,7 +11,7 @@ from pathlib import Path
 from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 import survivors.datasets as ds
 import survivors.constants as cnt
-from .helpers_ai_advice import AI_TASKS, build_ai_advice, format_ai_advice_context
+from .helpers_ai_advice import AI_TASKS, build_ai_advice
 from .helpers_project_rag import build_project_rag_answer
 from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics
 from .helpers_leaderboard import load_leaderboard_images, load_overall_leaderboard_rows
@@ -201,55 +201,6 @@ async def ai_advice(
     )
 
 
-@app.post("/ai-chat", name="ai_chat")
-async def ai_chat(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "Некорректный JSON-запрос."}, status_code=400)
-
-    dataset_id = str(payload.get("dataset_id", "")).strip()
-    task_id = str(payload.get("task_id", "")).strip()
-    question = str(payload.get("question", "")).strip()
-    history = payload.get("history") or []
-
-    if not dataset_id or not task_id or not question:
-        return JSONResponse({"ok": False, "error": "Нужны dataset_id, task_id и question."}, status_code=400)
-    if not isinstance(history, list):
-        history = []
-
-    advice = build_ai_advice(BASE_DIR, dataset_id, task_id, use_llm=False)
-    if not advice.get("has_result"):
-        return JSONResponse({"ok": False, "error": advice.get("error", "Нет результата для диалога.")}, status_code=400)
-
-    answer = build_project_rag_answer(
-        BASE_DIR.parent,
-        question,
-        history,
-        pinned_context=format_ai_advice_context(advice),
-        pinned_title=f"Текущий результат: {dataset_id} · {advice.get('task_label')}",
-    )
-    if answer.get("text"):
-        return {
-            "ok": True,
-            "answer": answer["text"],
-            "provider": answer["provider"],
-            "model": answer["model"],
-            "sources": answer.get("sources", []),
-        }
-
-    return JSONResponse(
-        {
-            "ok": False,
-            "error": answer.get("error") or "Не удалось получить RAG-ответ.",
-            "provider": answer.get("provider"),
-            "model": answer.get("model"),
-            "sources": answer.get("sources", []),
-        },
-        status_code=502 if answer.get("enabled") else 400,
-    )
-
-
 @app.post("/project-rag-chat", name="project_rag_chat")
 async def project_rag_chat(request: Request):
     try:
@@ -415,6 +366,23 @@ async def compare_models(
 @app.get("/goal", name="goal_page")
 async def goal_page(request: Request):
     return templates.TemplateResponse(request, "goal.html", {"request": request, "messages": []})
+
+
+@app.get("/overview", name="overview_page")
+async def overview_page(request: Request):
+    leaderboard_rows = load_overall_leaderboard_rows(BASE_DIR / "tables" / "leaderboards_by_task.xlsx")
+    notebook_figures = load_leaderboard_images(BASE_DIR / "images", limit=3)
+    return templates.TemplateResponse(
+        request,
+        "overview.html",
+        {
+            "request": request,
+            "messages": [],
+            "leaderboard_rows": leaderboard_rows,
+            "top_methods": leaderboard_rows[:3],
+            "notebook_figures": notebook_figures,
+        },
+    )
 
 
 @app.get("/link", name="link_page")

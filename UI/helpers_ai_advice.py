@@ -276,14 +276,6 @@ def _advice_facts(advice: dict[str, Any]) -> str:
     )
 
 
-def format_ai_advice_context(advice: dict[str, Any]) -> str:
-    return _advice_facts(advice)
-
-
-def format_ai_advice_context(advice: dict[str, Any]) -> str:
-    return _advice_facts(advice)
-
-
 def _normalize_chat_history(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     normalized = []
     for item in (history or [])[-8:]:

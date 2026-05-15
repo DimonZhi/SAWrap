@@ -4,7 +4,19 @@
     <meta charset="UTF-8">
     <title>{% block title %}SAWrapSA{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260418c" rel="stylesheet">
+    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260516a" rel="stylesheet">
+    <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)'], ['$', '$']],
+        displayMath: [['\\[', '\\]'], ['$$', '$$']]
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      }
+    };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body>
 <header class="topbar">
@@ -15,22 +27,23 @@
                     Overview
                 </summary>
                 <div class="topmenu-dropdown">
-                    <a href="{{ url_for('goal_page') }}" class="topmenu-item">
+                    <a href="{{ url_for('overview_page') }}#goal" class="topmenu-item">
                         Цель проекта
                     </a>
-                    <a href="{{ url_for('link_page') }}" class="topmenu-item">
-                        Ссылка
-                    </a>
-                    <a href="{{ url_for('methodology_page') }}" class="topmenu-item">
+                    <a href="{{ url_for('overview_page') }}#methodology" class="topmenu-item">
                         Методология разработки
                     </a>
-                    <!--
-                    <a href="{{ url_for('example_page') }}" class="topmenu-item">
-                        Пример
+                    <a href="{{ url_for('overview_page') }}#experiment" class="topmenu-item">
+                        Экспериментальный сценарий
                     </a>
-                    -->
-                    <a href="{{ url_for('leaderboard_page') }}" class="topmenu-item">
-                        Лидерборд
+                    <a href="{{ url_for('overview_page') }}#results" class="topmenu-item">
+                        Результаты
+                    </a>
+                    <a href="{{ url_for('overview_page') }}#usage" class="topmenu-item">
+                        Как использовать
+                    </a>
+                    <a href="{{ url_for('link_page') }}" class="topmenu-item">
+                        Ссылка на проект
                     </a>
                 </div>
             </details>

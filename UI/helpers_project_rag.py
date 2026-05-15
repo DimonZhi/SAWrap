@@ -67,15 +67,50 @@ RAG_INDEX_ENV = "SAWRAP_RAG_INDEX_DIR"
 DEFAULT_RAG_INDEX_RELATIVE = Path("UI") / "rag_index"
 LEGACY_RAG_INDEX_RELATIVE = Path("rag_index")
 DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
-SUPPORTED_RETRIEVERS = {"tfidf", "embeddings"}
-DEFAULT_RAG_TOP_K = 12
+SUPPORTED_RETRIEVERS = {"tfidf", "embeddings", "semantic"}
+DEFAULT_RAG_TOP_K = 14
 OVERVIEW_SOURCES = [
     "knowledge/project_context.md",
     "knowledge/thesis_summary.md",
     "knowledge/experiments_summary.md",
-    "knowledge/jury_faq.md",
-    "knowledge/product_and_contest.md",
+    "knowledge/engineering_evidence.md",
+    "knowledge/data_science_evidence.md",
+    "knowledge/ai_usage_evidence.md",
+    "knowledge/product_evidence.md",
+    "knowledge/project_faq.md",
+    "knowledge/product_context.md",
 ]
+FOUNDATION_REQUIRED_SECTIONS = [
+    ("knowledge/project_faq.md", "В чем главная научная идея"),
+    ("knowledge/project_context.md", "Центральная идея"),
+    ("knowledge/thesis_summary.md", "Научная новизна"),
+    ("knowledge/experiments_summary.md", "Модели"),
+    ("knowledge/experiments_summary.md", "Метрики"),
+    ("knowledge/experiments_summary.md", "Формулы ключевых метрик"),
+    ("knowledge/experiments_summary.md", "Протокол эксперимента"),
+    ("knowledge/experiments_summary.md", "Итоговое ранжирование"),
+    ("knowledge/experiments_summary.md", "Интерпретация"),
+    ("knowledge/engineering_evidence.md", "Разработка и инженерия"),
+    ("knowledge/data_science_evidence.md", "Data Science"),
+    ("knowledge/ai_usage_evidence.md", "Применение AI"),
+    ("knowledge/product_evidence.md", "Продуктовое мышление"),
+]
+FOUNDATION_TITLE_KEYWORDS = {
+    "центральная идея",
+    "научная идея",
+    "научная новизна",
+    "метрики",
+    "методы оценки качества",
+    "качество моделей",
+    "модели",
+    "протокол эксперимента",
+    "итоговое ранжирование",
+    "интерпретация",
+    "результаты",
+    "ключевые выводы",
+    "metric:",
+    "формул",
+}
 
 
 @dataclass(frozen=True)
@@ -444,6 +479,7 @@ def write_project_vector_index(
 ) -> dict[str, Any]:
     if retriever not in SUPPORTED_RETRIEVERS:
         raise ValueError(f"Неизвестный retriever: {retriever}. Доступно: {', '.join(sorted(SUPPORTED_RETRIEVERS))}.")
+    canonical_retriever = "embeddings" if retriever == "semantic" else retriever
     selected_chunks = [chunk for chunk in chunks if chunk.text.strip()]
     if not selected_chunks:
         raise ValueError("Нет фрагментов для построения RAG-индекса.")
@@ -456,7 +492,7 @@ def write_project_vector_index(
         (target_dir / stale_file).unlink(missing_ok=True)
 
     _write_chunks_file(target_dir, selected_chunks)
-    if retriever == "embeddings":
+    if canonical_retriever == "embeddings":
         index_info = _write_embedding_index(
             target_dir,
             texts,
@@ -509,7 +545,7 @@ def _load_project_vector_index_cached(index_dir_raw: str, cache_key: int):
     )
     retriever = manifest.get("retriever")
 
-    if retriever == "embeddings":
+    if retriever in {"embeddings", "semantic"}:
         embeddings_path = index_dir / "embeddings.npy"
         if not embeddings_path.exists():
             return None
@@ -556,7 +592,7 @@ def retrieve_project_context_from_vector_index(
         return []
 
     manifest = index.get("manifest", {})
-    if manifest.get("retriever") == "embeddings":
+    if manifest.get("retriever") in {"embeddings", "semantic"}:
         embedding_model = manifest.get("embedding_model") or DEFAULT_EMBEDDING_MODEL
         local_only = _env_true("SAWRAP_EMBEDDING_LOCAL_ONLY", default=True)
         embedder = _load_sentence_transformer(str(embedding_model), local_files_only=local_only)
@@ -627,6 +663,47 @@ def _overview_context_chunks(repo_dir: Path) -> list[KnowledgeChunk]:
     return chunks
 
 
+def _all_available_context_chunks(repo_dir: Path) -> list[KnowledgeChunk]:
+    chunks = list(load_project_knowledge(str(repo_dir.resolve())))
+    index = load_project_vector_index(repo_dir)
+    if index:
+        chunks.extend(index.get("chunks", ()))
+    return chunks
+
+
+def _foundation_context_chunks(repo_dir: Path, question: str, top_k: int = 10) -> list[KnowledgeChunk]:
+    del question
+    selected = []
+    seen = set()
+
+    all_chunks = _all_available_context_chunks(repo_dir)
+    for required_source, required_title in FOUNDATION_REQUIRED_SECTIONS:
+        for chunk in all_chunks:
+            if chunk.source != required_source or required_title.lower() not in chunk.title.lower():
+                continue
+            key = (chunk.source, chunk.title, chunk.text[:180])
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(KnowledgeChunk(chunk.source, chunk.title, chunk.text, max(chunk.score, 0.003)))
+            break
+        if len(selected) >= top_k:
+            return selected
+
+    for chunk in all_chunks:
+        haystack = f"{chunk.source}\n{chunk.title}\n{chunk.text[:500]}".lower()
+        if not any(keyword in haystack for keyword in FOUNDATION_TITLE_KEYWORDS):
+            continue
+        key = (chunk.source, chunk.title, chunk.text[:180])
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(KnowledgeChunk(chunk.source, chunk.title, chunk.text, max(chunk.score, 0.002)))
+        if len(selected) >= top_k:
+            break
+    return selected
+
+
 def _merge_ranked_chunks(*chunk_groups: list[KnowledgeChunk], top_k: int = DEFAULT_RAG_TOP_K) -> list[KnowledgeChunk]:
     merged: list[KnowledgeChunk] = []
     seen = set()
@@ -643,33 +720,57 @@ def _merge_ranked_chunks(*chunk_groups: list[KnowledgeChunk], top_k: int = DEFAU
 
 
 def retrieve_project_context(repo_dir: Path, question: str, top_k: int = DEFAULT_RAG_TOP_K) -> list[KnowledgeChunk]:
-    vector_chunks = retrieve_project_context_from_vector_index(repo_dir, question, top_k=min(top_k, 8))
-    keyword_chunks = _retrieve_project_context_keyword(repo_dir, question, top_k=max(6, top_k // 2))
+    vector_chunks = retrieve_project_context_from_vector_index(repo_dir, question, top_k=min(top_k, 6))
+    keyword_chunks = _retrieve_project_context_keyword(repo_dir, question, top_k=4)
+    foundation_chunks = _foundation_context_chunks(repo_dir, question, top_k=10)
     overview_chunks = _overview_context_chunks(repo_dir)
-    return _merge_ranked_chunks(vector_chunks, overview_chunks, keyword_chunks, top_k=top_k)
+    return _merge_ranked_chunks(keyword_chunks, foundation_chunks, vector_chunks, overview_chunks, top_k=top_k)
+
+
+def _context_audit(chunks: list[KnowledgeChunk]) -> str:
+    titles = {chunk.title.lower() for chunk in chunks}
+    sources = {chunk.source for chunk in chunks}
+
+    facts = []
+    if any("модели" in title for title in titles):
+        facts.append(
+            "В контексте есть конкретные модели: LogisticRegression, SVC, KNeighborsClassifier, "
+            "DecisionTreeClassifier, RandomForestClassifier, GradientBoostingClassifier, ElasticNet, "
+            "SVR, KNeighborsRegressor, DecisionTreeRegressor, RandomForestRegressor, "
+            "GradientBoostingRegressor, KaplanMeierFitter, CoxPHSurvivalAnalysis, SurvivalTree, "
+            "RandomSurvivalForest, GradientBoostingSurvivalAnalysis, CRAID, ParallelBootstrapCRAID."
+        )
+    if any("итоговое ранжирование" in title or "интерпретация" in title for title in titles):
+        facts.append(
+            "В контексте есть результаты экспериментов: лучшие модели по итоговому ранжированию - "
+            "ParallelBootstrapCRAID, CRAID и RandomForestRegressor; ParallelBootstrapCRAID занял "
+            "1 место в survival-блоке."
+        )
+    if any("метрики" in title or "формулы" in title for title in titles):
+        facts.append(
+            "В контексте есть метрики и формулы: AUC_EVENT, LOGLOSS_EVENT, RMSE_EVENT, RMSE_TIME, "
+            "R2_TIME, MAPE_TIME, MEDAPE_TIME, SPEARMAN_TIME, RMSLE_TIME, CI, IBS, AUPRC."
+        )
+    if any(source.startswith("thesis/") for source in sources):
+        facts.append("В контексте есть фрагменты диплома из LaTeX-источников thesis/contents/*.tex.")
+
+    if not facts:
+        return "Контроль контекста: специальных разделов с моделями, метриками или результатами не найдено."
+
+    return (
+        "Контроль контекста перед ответом:\n"
+        + "\n".join(f"- {fact}" for fact in facts)
+        + "\nНе создавай раздел ограничений и не утверждай, что перечисленных выше данных нет."
+    )
 
 
 def _build_rag_messages(
     question: str,
     chunks: list[KnowledgeChunk],
     history: list[dict[str, Any]] | None = None,
-    pinned_context: str | None = None,
-    pinned_title: str = "Текущий результат AI-интерпретатора",
 ) -> list[dict[str, str]]:
     context_blocks = []
-    if pinned_context:
-        context_blocks.append(
-            "\n".join(
-                [
-                    "[1] Источник: current_result",
-                    f"Раздел: {pinned_title}",
-                    pinned_context[:2200],
-                ]
-            )
-        )
-
-    start_index = 2 if pinned_context else 1
-    for index, chunk in enumerate(chunks, start=start_index):
+    for index, chunk in enumerate(chunks, start=1):
         context_blocks.append(
             "\n".join(
                 [
@@ -689,10 +790,14 @@ def _build_rag_messages(
                 "Проектные факты, числа, названия файлов, датасетов, моделей и метрик бери только из "
                 "переданного контекста. Общие знания ML/DS можно использовать для объяснений, выводов "
                 "и интуиции, но явно отделяй их от фактов проекта фразами вроде 'из этого следует' "
-                "или 'как общее ML-объяснение'. Если точного факта нет в источниках, не отказывайся "
-                "целиком: сначала скажи, что именно не найдено в источниках, затем дай аккуратное "
-                "общее объяснение или предложи, какие данные добавить в knowledge/index. "
+                "или 'как общее ML-объяснение'. Если точного факта нет в источниках, кратко скажи "
+                "об этом внутри основного объяснения без отдельного раздела ограничений. "
                 "Не выдумывай новые метрики, результаты экспериментов или ссылки. "
+                "Перед ответом проверь найденный контекст на разделы с метриками, формулами "
+                "и thesis/contents/2_problem_def.tex. Не утверждай, что метрики или формулы не указаны, "
+                "если в источниках есть хотя бы их перечень или определения. "
+                "Не выводи разделы с названиями 'Ограничения', 'Ограничения/источники', 'Недостатки' "
+                "или похожие блоки, если пользователь сам прямо не попросил ограничения. "
                 "Формулы пиши в LaTeX с delimiters \\( ... \\) или \\[ ... \\], например "
                 "\\(S(t \\mid X)=P(T>t \\mid X)\\). В конце укажи использованные источники в формате [1], [2]."
             ),
@@ -702,9 +807,10 @@ def _build_rag_messages(
             "content": (
                 "Найденный RAG-контекст:\n\n"
                 f"{'\n\n'.join(context_blocks)}\n\n"
+                f"{_context_audit(chunks)}\n\n"
                 "Используй этот контекст как фактическую основу ответа. "
-                "Если вопрос про текущий результат, источник current_result важнее остальных. "
-                "Структура ответа: короткий прямой вывод, затем объяснение, затем ограничения/источники."
+                "Структура ответа: короткий прямой вывод, затем объяснение, затем использованные источники. "
+                "Не добавляй отдельный блок ограничений."
             ),
         },
     ]
@@ -716,21 +822,13 @@ def _build_rag_messages(
 def _local_fallback_answer(
     question: str,
     chunks: list[KnowledgeChunk],
-    pinned_context: str | None = None,
 ) -> str:
-    clean_pinned_context = (pinned_context or "").strip()
-    if not chunks and not clean_pinned_context:
+    if not chunks:
         return "Я не нашел релевантных фрагментов в базе знаний проекта."
 
-    source_parts = []
-    if clean_pinned_context:
-        source_parts.append("[1] current_result")
-    source_start = 2 if clean_pinned_context else 1
-    source_parts.extend(
-        f"[{index}] {chunk.source}" for index, chunk in enumerate(chunks[:3], start=source_start)
-    )
+    source_parts = [f"[{index}] {chunk.source}" for index, chunk in enumerate(chunks[:3], start=1)]
     sources = ", ".join(source_parts)
-    first = " ".join((chunks[0].text if chunks else clean_pinned_context).split())
+    first = " ".join(chunks[0].text.split())
     if len(first) > 520:
         first = first[:517].rstrip() + "..."
     return (
@@ -746,8 +844,6 @@ def build_project_rag_answer(
     question: str,
     history: list[dict[str, Any]] | None = None,
     *,
-    pinned_context: str | None = None,
-    pinned_title: str = "Текущий результат AI-интерпретатора",
     api_key: str | None = None,
     model: str | None = None,
     timeout: float = 25.0,
@@ -765,25 +861,10 @@ def build_project_rag_answer(
             "sources": [],
         }
 
-    clean_pinned_context = (pinned_context or "").strip()
-    retrieval_question = f"{clean_question}\n{clean_pinned_context}" if clean_pinned_context else clean_question
-    chunks = retrieve_project_context(repo_dir, retrieval_question, top_k=DEFAULT_RAG_TOP_K)
-    sources = []
-    if clean_pinned_context:
-        preview = " ".join(clean_pinned_context.split())
-        if len(preview) > 260:
-            preview = preview[:257].rstrip() + "..."
-        sources.append(
-            {
-                "source": "current_result",
-                "title": pinned_title,
-                "preview": preview,
-                "score": None,
-            }
-        )
-    sources.extend(chunk.to_public_dict() for chunk in chunks)
+    chunks = retrieve_project_context(repo_dir, clean_question, top_k=DEFAULT_RAG_TOP_K)
+    sources = [chunk.to_public_dict() for chunk in chunks]
 
-    if not chunks and not clean_pinned_context:
+    if not chunks:
         return {
             "enabled": False,
             "provider": "OpenRouter",
@@ -798,8 +879,6 @@ def build_project_rag_answer(
             clean_question,
             chunks,
             history,
-            pinned_context=clean_pinned_context,
-            pinned_title=pinned_title,
         ),
         api_key=api_key,
         model=model,
@@ -811,7 +890,7 @@ def build_project_rag_answer(
     answer["sources"] = sources
 
     if not answer.get("text") and not answer.get("enabled"):
-        answer["text"] = _local_fallback_answer(clean_question, chunks, clean_pinned_context)
+        answer["text"] = _local_fallback_answer(clean_question, chunks)
         answer["error"] = None
 
     return answer

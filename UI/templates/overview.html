@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Обзор проекта · SAWrapSA{% endblock %}
+
+{% block content %}
+<div class="page-header overview-hero">
+  <span class="overview-eyebrow">SAWrap</span>
+  <h1>Сравнение моделей для прогнозирования терминальных событий</h1>
+  <p class="page-subtitle">
+    Обзор цели исследования, методологии разработки, экспериментального сценария,
+    результатов и пользовательского сценария работы с системой.
+  </p>
+</div>
+
+<section class="overview-tabs card">
+  <div class="overview-tabbar" role="tablist" aria-label="Разделы проекта">
+    <button class="overview-tab is-active" type="button" data-tab="goal">Цель проекта</button>
+    <button class="overview-tab" type="button" data-tab="methodology">Методология разработки</button>
+    <button class="overview-tab" type="button" data-tab="experiment">Экспериментальный сценарий</button>
+    <button class="overview-tab" type="button" data-tab="results">Результаты</button>
+    <button class="overview-tab" type="button" data-tab="usage">Как использовать</button>
+  </div>
+
+  <article class="overview-panel is-active" data-panel="goal" id="goal">
+    <div class="overview-panel-grid">
+      <div>
+        <span class="overview-kicker">Цель и научная идея</span>
+        <h2>Единое survival-представление для моделей разных классов</h2>
+        <p>
+          Цель проекта - разработать и экспериментально проверить схему унификации
+          откликов моделей классификации, регрессии и анализа выживаемости для задач
+          прогнозирования терминальных событий.
+        </p>
+        <p>
+          В таких задачах важно учитывать не только факт события, но и время до него:
+          часть наблюдений может быть правоцензурированной, то есть событие не наступило
+          до окончания наблюдения. Поэтому прямое сравнение классификатора, регрессора
+          и survival-модели становится неоднозначным.
+        </p>
+        <div class="formula-card">
+          <span>Общее представление</span>
+          <div class="formula-render">\[S(t \mid X)=P(T>t \mid X)\]</div>
+          <code>S(t | X) = P(T &gt; t | X)</code>
+        </div>
+      </div>
+      <div class="overview-proof-card">
+        <h3>Задачи исследования</h3>
+        <ul>
+          <li>Описать classification, regression и survival-постановки.</li>
+          <li>Сформулировать правила приведения прогнозов \(\widehat P(X)\), \(\widehat T(X)\) и \(\widehat S(t\mid X)\).</li>
+          <li>Реализовать адаптеры для моделей разных классов.</li>
+          <li>Провести сравнение на открытых медицинских наборах данных.</li>
+          <li>Проанализировать итоговое ранжирование методов.</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <article class="overview-panel" data-panel="methodology" id="methodology">
+    <span class="overview-kicker">Архитектура системы</span>
+    <h2>Методология разработки</h2>
+    <p>
+      SAWrap реализован как веб-ориентированная система, где вычислительный контур,
+      слой хранения результатов, интерфейс и AI-компоненты разделены на отдельные
+      модули. Это позволяет воспроизводить эксперименты и быстро анализировать
+      уже рассчитанные таблицы.
+    </p>
+    <div class="criteria-grid">
+      <div class="criteria-card">
+        <h3>Адаптеры моделей</h3>
+        <p><code>ClassifWrapSA</code>, <code>RegrWrapSA</code> и <code>SAWrapSA</code> приводят разные типы прогнозов к общей survival-схеме.</p>
+      </div>
+      <div class="criteria-card">
+        <h3>Backend и интерфейс</h3>
+        <p>FastAPI, Jinja2 и Plotly отвечают за формы, графики, лидерборды и AI-интерпретацию результатов.</p>
+      </div>
+      <div class="criteria-card">
+        <h3>Хранение результатов</h3>
+        <p>Предрассчитанные метрики находятся в <code>UI/tables</code>, поэтому сайт быстро открывает результаты без повторного обучения моделей.</p>
+      </div>
+      <div class="criteria-card">
+        <h3>Инфраструктура</h3>
+        <p>Docker, CI, unit-тесты, env-переменные и примеры деплоя поддерживают воспроизводимый запуск системы.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="overview-panel" data-panel="experiment" id="experiment">
+    <span class="overview-kicker">Эксперимент</span>
+    <h2>Экспериментальный сценарий</h2>
+    <div class="timeline">
+      <div class="timeline-step">
+        <strong>1. Данные</strong>
+        <p>Используются ACTG, GBSG, PBC, Rott2, Smarto, Framingham и Support2. Для каждого набора важны размер, признаки, объект прогноза и доля цензурирования.</p>
+      </div>
+      <div class="timeline-step">
+        <strong>2. Модели</strong>
+        <p>Сравниваются 19 методов: классификаторы, регрессоры и survival-модели, включая CoxPHSurvivalAnalysis, RandomSurvivalForest, CRAID и ParallelBootstrapCRAID.</p>
+      </div>
+      <div class="timeline-step">
+        <strong>3. Метрики</strong>
+        <p>Оцениваются 12 метрик в трех блоках: событие, время события и функция выживаемости.</p>
+      </div>
+      <div class="timeline-step">
+        <strong>4. Валидация и агрегация</strong>
+        <p>Для подбора гиперпараметров используется 5-кратная кросс-валидация, затем лучшие конфигурации проверяются на серии из 20 разбиений.</p>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="formula-card">
+        <span>Классификация события</span>
+        <p><code>AUC_EVENT</code>, <code>LOGLOSS_EVENT</code>, <code>RMSE_EVENT</code></p>
+      </div>
+      <div class="formula-card">
+        <span>Прогноз времени</span>
+        <p><code>RMSE_TIME</code>, <code>R2_TIME</code>, <code>MAPE_TIME</code>, <code>SPEARMAN_TIME</code>, <code>RMSLE_TIME</code></p>
+      </div>
+      <div class="formula-card">
+        <span>Выживаемость</span>
+        <p><code>CI</code>, <code>IBS</code>, <code>AUPRC</code></p>
+      </div>
+    </div>
+
+    <p class="overview-note">
+      Piecewise-модели будут добавлены позже как дополнительное расширение survival-семейства.
+    </p>
+  </article>
+
+  <article class="overview-panel" data-panel="results" id="results">
+    <span class="overview-kicker">Итоговое ранжирование</span>
+    <h2>Результаты экспериментов</h2>
+    <p>
+      Итоговые результаты показывают, что наиболее сильные позиции заняли модели анализа
+      выживаемости и ансамблевые методы. В сводной таблице первое место занимает
+      <strong>ParallelBootstrapCRAID</strong>, второе - <strong>CRAID</strong>, третье -
+      <strong>RandomForestRegressor</strong>.
+    </p>
+
+    {% if top_methods %}
+    <div class="result-strip">
+      {% for row in top_methods %}
+      <div>
+        <span class="result-rank">{{ row.position }}</span>
+        <strong>{{ row.method }}</strong>
+        <p>Средняя позиция: {{ row.avg_position }}; датасетов: {{ row.datasets if row.datasets is not none else "—" }}.</p>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="leaderboard-inline">
+      <h3>Общий leaderboard</h3>
+      <p>Источник: <code>UI/tables/leaderboards_by_task.xlsx</code>, лист <code>OVERALL_ALL</code>.</p>
+      {% if leaderboard_rows %}
+      <div class="leaderboard-table-wrap">
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>Место</th>
+              <th>Метод</th>
+              <th>Датасеты</th>
+              <th>Avg Position</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in leaderboard_rows %}
+            <tr{% if row.is_top_three %} class="is-top-row"{% endif %}>
+              <td>{{ row.position if row.position is not none else "—" }}</td>
+              <td>{{ row.method }}</td>
+              <td>{{ row.datasets if row.datasets is not none else "—" }}</td>
+              <td>{{ row.avg_position }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty-state">Не удалось загрузить общий leaderboard.</p>
+      {% endif %}
+    </div>
+
+    {% if notebook_figures %}
+    <div class="leaderboard-inline">
+      <h3>Визуальные сравнения</h3>
+      <div class="leaderboard-figures">
+        {% for figure in notebook_figures %}
+        <figure class="leaderboard-figure">
+          <img src="{{ figure.src }}" alt="{{ figure.title }}">
+        </figure>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </article>
+
+  <article class="overview-panel" data-panel="usage" id="usage">
+    <span class="overview-kicker">Работа с системой</span>
+    <h2>Как использовать</h2>
+    <ol class="usage-steps">
+      <li>Открой главную страницу и выбери датасет, пресет метрик и модели.</li>
+      <li>Построй Plotly-график для сравнения выбранных моделей по двум метрикам.</li>
+      <li>Открой AI-интерпретатор и выбери задачу: классификация события, прогноз времени или анализ выживаемости.</li>
+      <li>Используй RAG-ассистента, чтобы задать вопрос по диплому, коду, таблицам, метрикам или архитектуре.</li>
+      <li>Для локального запуска используй <code>SAWRAP_SKIP_MISSING_RECALC=1 python3 -m uvicorn SAWrap.UI.app:app --reload</code>.</li>
+    </ol>
+  </article>
+</section>
+
+<script>
+(() => {
+  const tabs = Array.from(document.querySelectorAll('.overview-tab'));
+  const panels = Array.from(document.querySelectorAll('.overview-panel'));
+
+  function activate(tabId) {
+    const fallback = tabs[0]?.dataset.tab;
+    const activeId = tabs.some((tab) => tab.dataset.tab === tabId) ? tabId : fallback;
+    tabs.forEach((tab) => tab.classList.toggle('is-active', tab.dataset.tab === activeId));
+    panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.panel === activeId));
+  }
+
+  function activeFromHash() {
+    activate((window.location.hash || '').replace('#', '') || 'goal');
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const id = tab.dataset.tab;
+      activate(id);
+      history.replaceState(null, '', `#${id}`);
+    });
+  });
+
+  window.addEventListener('hashchange', activeFromHash);
+  activeFromHash();
+})();
+</script>
+{% endblock %}

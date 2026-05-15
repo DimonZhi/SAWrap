@@ -73,6 +73,21 @@ Survival-блок:
 - `IBS`: ниже лучше;
 - `AUPRC`: выше лучше.
 
+## Формулы ключевых метрик
+
+В дипломе формулы метрик приведены в разделе с методами оценки качества. Основные определения:
+
+- `AUC_EVENT`: \(\mathrm{AUC}=\frac{1}{n_1n_0}\sum_{i:Y_{\tau,i}=1}\sum_{j:Y_{\tau,j}=0}\left[\mathbb{I}(\widehat P_i>\widehat P_j)+\frac{1}{2}\mathbb{I}(\widehat P_i=\widehat P_j)\right]\).
+- `LOGLOSS_EVENT`: \(\mathrm{LogLoss}=-\frac{1}{n}\sum_{i=1}^{n}\left[Y_{\tau,i}\ln \widehat P_i+(1-Y_{\tau,i})\ln(1-\widehat P_i)\right]\).
+- `RMSE_EVENT`: \(\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum_{i=1}^{n}(Y_{\tau,i}-\widehat P_i)^2}\).
+- `RMSE_TIME`: \(\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum_{i=1}^{n}(\widetilde T_i-\widehat T(X_i))^2}\).
+- `R2_TIME`: \(R^2=1-\frac{\sum_{i=1}^{n}(\widetilde T_i-\widehat T(X_i))^2}{\sum_{i=1}^{n}(\widetilde T_i-\overline T)^2}\).
+- `MAPE_TIME`: \(\mathrm{MAPE}=\frac{100}{n}\sum_{i=1}^{n}\left|\frac{\widetilde T_i-\widehat T(X_i)}{\max(\widetilde T_i,1)}\right|\).
+- `SPEARMAN_TIME`: \(\rho_s=1-\frac{6\sum_{i=1}^{n}d_i^2}{n(n^2-1)}\), если нет совпадающих рангов.
+- `CI`: \(\mathrm{CI}=\frac{\sum_{i,j}\mathbb{I}(\widetilde T_j<\widetilde T_i)\mathbb{I}(\widehat T(X_j)<\widehat T(X_i))}{\sum_{i,j}\mathbb{I}(\widetilde T_j<\widetilde T_i)}\).
+- `IBS`: \(\mathrm{IBS}=\frac{1}{t_{\max}}\int_{0}^{t_{\max}}BS(t)\,dt\).
+- `AUPRC`: \(AUPRC_{\delta=1}(\widehat S,T_i)=\int_{0}^{1}P(T_i/\phi>T>T_i\phi)\,d\phi\).
+
 ## Протокол эксперимента
 
 - Данные разбивались на обучающую и тестовую выборки.

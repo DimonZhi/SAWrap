@@ -179,46 +179,6 @@
           <p class="ai-note">{{ ai_advice.llm.error }}</p>
         {% endif %}
 
-        <div class="ai-chat-actions">
-          <button
-            type="button"
-            class="btn ai-chat-open"
-            id="ai-chat-open"
-            data-dataset-id="{{ ai_advice.dataset_id }}"
-            data-task-id="{{ ai_advice.task_id }}"
-          >
-            Спросить RAG-агента по результатам
-          </button>
-        </div>
-
-        <dialog class="ai-chat-dialog" id="ai-chat-dialog" data-chat-url="{{ url_for('ai_chat') }}">
-          <form method="dialog" class="ai-chat-header">
-            <div>
-              <h3>RAG-агент по результатам</h3>
-              <p>{{ ai_advice.dataset_id }} · {{ ai_advice.task_label }} · {{ ai_advice.recommended_method }}</p>
-            </div>
-            <button type="submit" class="ai-chat-close" aria-label="Закрыть">×</button>
-          </form>
-
-          <div class="ai-chat-messages" id="ai-chat-messages" aria-live="polite">
-            <div class="ai-chat-message assistant">
-              Спроси про выбранную модель, метрики, дипломную идею, код или аргументы для жюри. Я учту текущий результат и всю базу знаний проекта.
-            </div>
-          </div>
-
-          <form class="ai-chat-form" id="ai-chat-form">
-            <label class="ai-chat-input-wrap">
-              <span>Вопрос</span>
-              <textarea
-                id="ai-chat-question"
-                rows="3"
-                placeholder="Например: почему эта модель лучше с точки зрения дипломной идеи?"
-              ></textarea>
-            </label>
-            <button type="submit" class="btn btn-primary ai-chat-send">Спросить</button>
-          </form>
-        </dialog>
-
         <div class="ai-metrics-table-wrap">
           <table class="ai-metrics-table">
             <thead>
@@ -312,18 +272,6 @@
   </div>
 {% endif %}
 
-<script>
-window.MathJax = {
-  tex: {
-    inlineMath: [['\\(', '\\)'], ['$', '$']],
-    displayMath: [['\\[', '\\]'], ['$$', '$$']]
-  },
-  options: {
-    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-  }
-};
-</script>
-<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 function arrow(metricKey) {
@@ -440,12 +388,6 @@ function arrow(metricKey) {
   const plotData = {{ (plot_data  if plot_data else None) | tojson }};
   const metricsList = {{ (metrics_list or []) | tojson }};
 
-  const chatOpen = document.getElementById('ai-chat-open');
-  const chatDialog = document.getElementById('ai-chat-dialog');
-  const chatForm = document.getElementById('ai-chat-form');
-  const chatQuestion = document.getElementById('ai-chat-question');
-  const chatMessages = document.getElementById('ai-chat-messages');
-  const chatHistory = [];
   const ragShell = document.getElementById('project-rag-shell');
   const ragForm = document.getElementById('project-rag-form');
   const ragQuestion = document.getElementById('project-rag-question');
@@ -532,10 +474,6 @@ function arrow(metricKey) {
     renderMessageElement(element, element.textContent || '');
   });
 
-  function addChatMessage(role, text) {
-    return addMessage(chatMessages, role, text);
-  }
-
   function addMessage(container, role, text) {
     if (!container) return null;
     const messageEl = document.createElement('div');
@@ -573,68 +511,6 @@ function arrow(metricKey) {
       ragSources.appendChild(item);
     });
     ragSources.hidden = false;
-  }
-
-  if (chatOpen && chatDialog && chatForm && chatQuestion && chatMessages) {
-    chatOpen.addEventListener('click', () => {
-      if (typeof chatDialog.showModal === 'function') {
-        chatDialog.showModal();
-      } else {
-        chatDialog.setAttribute('open', 'open');
-      }
-      chatQuestion.focus();
-    });
-
-    chatForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const question = chatQuestion.value.trim();
-      if (!question) return;
-
-      chatQuestion.value = '';
-      addChatMessage('user', question);
-      const loadingEl = addChatMessage('assistant', 'Думаю над ответом...');
-
-      const submitButton = chatForm.querySelector('button[type="submit"]');
-      if (submitButton) submitButton.disabled = true;
-
-      try {
-        const response = await fetch(chatDialog.dataset.chatUrl, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            dataset_id: chatOpen.dataset.datasetId,
-            task_id: chatOpen.dataset.taskId,
-            question,
-            history: chatHistory,
-          }),
-        });
-        const payload = await response.json();
-        if (loadingEl) loadingEl.remove();
-
-        if (!response.ok || !payload.ok) {
-          addChatMessage('assistant', payload.error || 'Не удалось получить ответ.');
-          return;
-        }
-
-        addChatMessage('assistant', payload.answer);
-        if (payload.sources && payload.sources.length) {
-          const sourceText = payload.sources
-            .slice(0, 4)
-            .map((source, index) => `[${index + 1}] ${source.source} · ${source.title}`)
-            .join('\n');
-          addChatMessage('assistant', `Источники RAG:\n${sourceText}`);
-        }
-        chatHistory.push({role: 'user', content: question});
-        chatHistory.push({role: 'assistant', content: payload.answer});
-        while (chatHistory.length > 8) chatHistory.shift();
-      } catch (error) {
-        if (loadingEl) loadingEl.remove();
-        addChatMessage('assistant', `Ошибка запроса: ${error}`);
-      } finally {
-        if (submitButton) submitButton.disabled = false;
-        chatQuestion.focus();
-      }
-    });
   }
 
   if (ragShell && ragForm && ragQuestion && ragMessages) {
