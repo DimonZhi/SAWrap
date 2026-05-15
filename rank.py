@@ -1,9 +1,10 @@
 import os
+import re
 from pathlib import Path
 import pandas as pd
 import numpy as np
 
-FILES = [
+BASE_FILES = [
     "framingham.xlsx",
     "gbsg.xlsx",
     "rott2.xlsx",
@@ -13,7 +14,17 @@ FILES = [
     "actg.xlsx"
 ]
 
-MODELS = [
+PIECEWISE_FILES = {
+    "framingham": "Piecewise_framingham.xlsx",
+    "gbsg": "Piecewise_gbsg.xlsx",
+    "rott2": "Piecewise_rott2.xlsx",
+    "smarto": "Piecewise_smarto.xlsx",
+    "pbc": "Piesewise_pbc.xlsx",
+    "support2": "Piecewise_support2.xlsx",
+    "actg": "Piecewise_actg.xlsx",
+}
+
+BASE_MODELS = [
     "LogisticRegression",
     "KNeighborsClassifier",
     "DecisionTreeClassifier",
@@ -35,8 +46,15 @@ MODELS = [
     "ParallelBootstrapCRAID",
 ]
 
+PIECEWISE_MODEL_PREFIXES = {
+    "PiecewiseClassifWrapSA": "PiecewiseClassifWrapSA(",
+    "PiecewiseCensorAwareClassifWrapSA": "PiecewiseCensorAwareClassifWrapSA(",
+}
+
+PIECEWISE_ALLOWED_TIMES = {16}
+INCLUDE_PIECEWISE = False
+
 CLASSIFICATION_METRICS = [
-    "AUPRC_mean",
     "AUC_EVENT_mean",
     "LOGLOSS_EVENT_mean",
     "RMSE_EVENT_mean",
@@ -54,6 +72,7 @@ REGRESSION_METRICS = [
 SURVIVAL_METRICS = [
     "CI_mean",
     "IBS_mean",
+    "AUPRC_mean",
 ]
 
 HIGHER_BETTER = {
@@ -71,6 +90,49 @@ def _find_method_col(df):
         if str(c).strip().upper() == "METHOD":
             return c
     return None
+
+
+def _prepare_method_frame(df, dataset_name, allowed_methods=None):
+    method_col = _find_method_col(df)
+    if method_col is None:
+        raise ValueError(f"[{dataset_name}] miss method.")
+
+    df = df.copy()
+    df[method_col] = df[method_col].astype(str).str.strip()
+    if allowed_methods is not None:
+        df = df[df[method_col].isin(allowed_methods)].copy()
+    return df, method_col
+
+
+def _piecewise_public_name(method_name):
+    for public_name, raw_prefix in PIECEWISE_MODEL_PREFIXES.items():
+        if str(method_name).startswith(raw_prefix):
+            return public_name
+    return None
+
+
+def _piecewise_time(method_name):
+    match = re.search(r"times=(\d+)\)\s*$", str(method_name))
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def extract_piecewise_rows(df, dataset_name, target_method_col=None):
+    df, method_col = _prepare_method_frame(df, dataset_name)
+    mask = df[method_col].apply(
+        lambda value: (
+            _piecewise_public_name(value) is not None
+            and _piecewise_time(value) in PIECEWISE_ALLOWED_TIMES
+        )
+    )
+    df = df[mask].copy()
+
+    if target_method_col and target_method_col != method_col:
+        df = df.rename(columns={method_col: target_method_col})
+        method_col = target_method_col
+
+    return df, method_col
 
 def compute_rank_block(df_metrics, metrics, block_name):
     present = [m for m in metrics if m in df_metrics.columns]
@@ -103,14 +165,8 @@ def compute_rank_block(df_metrics, metrics, block_name):
     return block_df, present, missing
 
 
-def rank_dataset_blocks(df, dataset_name):
-    method_col = _find_method_col(df)
-    if method_col is None:
-        raise ValueError(f"[{dataset_name}] miss method.")
-    df = df.copy()
-    df[method_col] = df[method_col].astype(str).str.strip()
-    all_metrics = list(dict.fromkeys(CLASSIFICATION_METRICS + REGRESSION_METRICS + SURVIVAL_METRICS))
-    df = df[df[method_col].isin(MODELS)].copy()
+def rank_dataset_blocks(df, dataset_name, allowed_methods=None):
+    df, method_col = _prepare_method_frame(df, dataset_name, allowed_methods=allowed_methods)
     df = df.set_index(method_col)
 
     results = pd.DataFrame(index=df.index)
@@ -228,13 +284,16 @@ def main():
     script_dir = Path(__file__).resolve().parent
     tables_dir = script_dir / "UI" / "tables"
 
-    paths = [tables_dir / f for f in FILES]
+    paths = [tables_dir / f for f in BASE_FILES]
 
     print("Script dir:", script_dir)
     print("Tables dir:", tables_dir)
     print("Looking for files:")
     for p in paths:
-        print(" ", p.name, "|", "OK" if p.exists() else "MISSING")
+        piecewise_name = PIECEWISE_FILES.get(p.stem)
+        piecewise_path = tables_dir / piecewise_name if piecewise_name else None
+        piecewise_status = "OK" if piecewise_path and piecewise_path.exists() else "MISSING"
+        print(" ", p.name, "|", "OK" if p.exists() else "MISSING", "| piecewise:", piecewise_name, piecewise_status)
 
     per_dataset = {}
     diagnostics = []
@@ -253,9 +312,39 @@ def main():
             continue
 
         try:
-            tbl, diag = rank_dataset_blocks(df, ds)
+            base_df, _ = _prepare_method_frame(df, ds, allowed_methods=BASE_MODELS)
+
+            piecewise_rows = pd.DataFrame(columns=base_df.columns)
+            piecewise_name = PIECEWISE_FILES.get(ds)
+            piecewise_status = "disabled"
+            piecewise_error = ""
+
+            if INCLUDE_PIECEWISE:
+                piecewise_path = tables_dir / piecewise_name if piecewise_name else None
+                piecewise_status = "missing_file"
+
+                if piecewise_path and piecewise_path.exists():
+                    try:
+                        piecewise_df = pd.read_excel(piecewise_path)
+                        piecewise_rows, _ = extract_piecewise_rows(
+                            piecewise_df,
+                            ds,
+                            target_method_col=_find_method_col(base_df),
+                        )
+                        piecewise_status = "ok" if not piecewise_rows.empty else "no_candidates"
+                    except Exception as piecewise_exc:
+                        piecewise_status = "error"
+                        piecewise_error = str(piecewise_exc)
+
+            final_df = base_df.copy()
+            tbl, diag = rank_dataset_blocks(final_df, ds, allowed_methods=None)
             per_dataset[ds] = tbl
             diag["Status"] = "ok"
+            diag["piecewise_file"] = piecewise_name or ""
+            diag["piecewise_status"] = piecewise_status
+            diag["piecewise_rows_added"] = int(len(piecewise_rows))
+            diag["piecewise_unique_methods"] = int(piecewise_rows[_find_method_col(piecewise_rows)].nunique()) if not piecewise_rows.empty else 0
+            diag["piecewise_error"] = piecewise_error
             diagnostics.append(diag)
         except Exception as e:
             diagnostics.append({"Dataset": ds, "Status": "process_error", "Path": str(path), "Error": str(e)})
