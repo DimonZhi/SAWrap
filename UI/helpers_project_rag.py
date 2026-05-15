@@ -780,7 +780,7 @@ def _build_rag_messages(
                 ]
             )
         )
-
+    joined_context = "\n\n".join(context_blocks)
     messages = [
         {
             "role": "system",
@@ -806,7 +806,7 @@ def _build_rag_messages(
             "role": "user",
             "content": (
                 "Найденный RAG-контекст:\n\n"
-                f"{'\n\n'.join(context_blocks)}\n\n"
+                f"{joined_context}\n\n"
                 f"{_context_audit(chunks)}\n\n"
                 "Используй этот контекст как фактическую основу ответа. "
                 "Структура ответа: короткий прямой вывод, затем объяснение, затем использованные источники. "
