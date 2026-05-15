@@ -27,7 +27,6 @@ RUN useradd --create-home --uid 10001 appuser
 
 RUN mkdir -p /app/survival_wrappers
 COPY __init__.py /app/survival_wrappers/__init__.py
-COPY metrics_sa.py /app/survival_wrappers/metrics_sa.py
 COPY UI /app/survival_wrappers/UI
 
 RUN chown -R appuser:appuser /app
