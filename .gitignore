@@ -18,5 +18,7 @@ env/
 build/
 dist/
 results/
+rag_index/
+UI/rag_index/
 
 *.log

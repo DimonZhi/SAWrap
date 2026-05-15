@@ -173,11 +173,51 @@
               <h4>LLM-интерпретация</h4>
               <span>{{ ai_advice.llm.provider }} · {{ ai_advice.llm.model }}</span>
             </div>
-            <p>{{ ai_advice.llm.text }}</p>
+            <div class="ai-rendered ai-markdown">{{ ai_advice.llm.text }}</div>
           </div>
         {% elif ai_advice.llm and ai_advice.llm.error %}
           <p class="ai-note">{{ ai_advice.llm.error }}</p>
         {% endif %}
+
+        <div class="ai-chat-actions">
+          <button
+            type="button"
+            class="btn ai-chat-open"
+            id="ai-chat-open"
+            data-dataset-id="{{ ai_advice.dataset_id }}"
+            data-task-id="{{ ai_advice.task_id }}"
+          >
+            Спросить RAG-агента по результатам
+          </button>
+        </div>
+
+        <dialog class="ai-chat-dialog" id="ai-chat-dialog" data-chat-url="{{ url_for('ai_chat') }}">
+          <form method="dialog" class="ai-chat-header">
+            <div>
+              <h3>RAG-агент по результатам</h3>
+              <p>{{ ai_advice.dataset_id }} · {{ ai_advice.task_label }} · {{ ai_advice.recommended_method }}</p>
+            </div>
+            <button type="submit" class="ai-chat-close" aria-label="Закрыть">×</button>
+          </form>
+
+          <div class="ai-chat-messages" id="ai-chat-messages" aria-live="polite">
+            <div class="ai-chat-message assistant">
+              Спроси про выбранную модель, метрики, дипломную идею, код или аргументы для жюри. Я учту текущий результат и всю базу знаний проекта.
+            </div>
+          </div>
+
+          <form class="ai-chat-form" id="ai-chat-form">
+            <label class="ai-chat-input-wrap">
+              <span>Вопрос</span>
+              <textarea
+                id="ai-chat-question"
+                rows="3"
+                placeholder="Например: почему эта модель лучше с точки зрения дипломной идеи?"
+              ></textarea>
+            </label>
+            <button type="submit" class="btn btn-primary ai-chat-send">Спросить</button>
+          </form>
+        </dialog>
 
         <div class="ai-metrics-table-wrap">
           <table class="ai-metrics-table">
@@ -218,6 +258,37 @@
   {% endif %}
 </section>
 
+<section class="card project-rag-card">
+  <div class="section-heading">
+    <div>
+      <h2>AI-ассистент по проекту</h2>
+      <p>RAG по диплому, базе знаний, коду, README и таблицам результатов.</p>
+    </div>
+  </div>
+
+  <div class="project-rag-shell" id="project-rag-shell" data-chat-url="{{ url_for('project_rag_chat') }}">
+    <div class="project-rag-messages" id="project-rag-messages" aria-live="polite">
+      <div class="ai-chat-message assistant">
+        Спроси про научную идею, метрики, архитектуру, результаты экспериментов или как объяснить проект жюри.
+      </div>
+    </div>
+
+    <form class="project-rag-form" id="project-rag-form">
+      <label class="ai-chat-input-wrap">
+        <span>Вопрос по проекту</span>
+        <textarea
+          id="project-rag-question"
+          rows="3"
+          placeholder="Например: в чем научная новизна проекта?"
+        ></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary project-rag-send">Спросить RAG</button>
+    </form>
+
+    <div class="project-rag-sources" id="project-rag-sources" hidden></div>
+  </div>
+</section>
+
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-top:0;font-size:18px;">График метрик (Plotly)</h2>
   <div class="plot-toolbar" id="plot-toolbar">
@@ -241,6 +312,18 @@
   </div>
 {% endif %}
 
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$']],
+    displayMath: [['\\[', '\\]'], ['$$', '$$']]
+  },
+  options: {
+    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+  }
+};
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 function arrow(metricKey) {
@@ -356,6 +439,249 @@ function arrow(metricKey) {
   const ySelect = document.getElementById('plot-y-select');
   const plotData = {{ (plot_data  if plot_data else None) | tojson }};
   const metricsList = {{ (metrics_list or []) | tojson }};
+
+  const chatOpen = document.getElementById('ai-chat-open');
+  const chatDialog = document.getElementById('ai-chat-dialog');
+  const chatForm = document.getElementById('ai-chat-form');
+  const chatQuestion = document.getElementById('ai-chat-question');
+  const chatMessages = document.getElementById('ai-chat-messages');
+  const chatHistory = [];
+  const ragShell = document.getElementById('project-rag-shell');
+  const ragForm = document.getElementById('project-rag-form');
+  const ragQuestion = document.getElementById('project-rag-question');
+  const ragMessages = document.getElementById('project-rag-messages');
+  const ragSources = document.getElementById('project-rag-sources');
+  const ragHistory = [];
+
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function renderMarkdown(text) {
+    const codeBlocks = [];
+    let source = String(text || '').replace(/\r\n/g, '\n');
+    source = source.replace(/```([\s\S]*?)```/g, (_, code) => {
+      const token = `@@CODEBLOCK${codeBlocks.length}@@`;
+      codeBlocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
+      return `\n\n${token}\n\n`;
+    });
+
+    let html = escapeHtml(source);
+    html = html.replace(/^###\s+(.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/\*\*([^*\n][\s\S]*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/(?:^|\n)((?:\s*[-*]\s+.+(?:\n|$))+)/g, (_, block) => {
+      const items = block.trim().split('\n').map((line) => {
+        return `<li>${line.replace(/^\s*[-*]\s+/, '')}</li>`;
+      }).join('');
+      return `\n<ul>${items}</ul>\n`;
+    });
+
+    html = html
+      .split(/\n{2,}/)
+      .map((block) => {
+        const trimmed = block.trim();
+        if (!trimmed) return '';
+        if (
+          trimmed.startsWith('<ul>') ||
+          trimmed.startsWith('<pre>') ||
+          trimmed.startsWith('<h4>') ||
+          /^@@CODEBLOCK\d+@@$/.test(trimmed)
+        ) {
+          return trimmed;
+        }
+        return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+      })
+      .filter(Boolean)
+      .join('');
+
+    codeBlocks.forEach((block, index) => {
+      html = html.replace(new RegExp(`(?:<p>)?@@CODEBLOCK${index}@@(?:</p>)?`, 'g'), block);
+    });
+    return html;
+  }
+
+  function typesetMath(element) {
+    if (!element) return;
+    const run = () => {
+      if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+        window.MathJax.typesetPromise([element]).catch(() => {});
+      }
+    };
+    if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+      run();
+    } else {
+      window.setTimeout(run, 250);
+      window.setTimeout(run, 900);
+    }
+  }
+
+  function renderMessageElement(element, text) {
+    if (!element) return;
+    element.innerHTML = renderMarkdown(text);
+    typesetMath(element);
+  }
+
+  document.querySelectorAll('.ai-rendered').forEach((element) => {
+    renderMessageElement(element, element.textContent || '');
+  });
+
+  function addChatMessage(role, text) {
+    return addMessage(chatMessages, role, text);
+  }
+
+  function addMessage(container, role, text) {
+    if (!container) return null;
+    const messageEl = document.createElement('div');
+    messageEl.className = `ai-chat-message ${role}`;
+    container.appendChild(messageEl);
+    renderMessageElement(messageEl, text);
+    container.scrollTop = container.scrollHeight;
+    return messageEl;
+  }
+
+  function renderRagSources(sources) {
+    if (!ragSources) return;
+    ragSources.innerHTML = '';
+    if (!sources || !sources.length) {
+      ragSources.hidden = true;
+      return;
+    }
+
+    const title = document.createElement('h4');
+    title.textContent = 'Источники RAG';
+    ragSources.appendChild(title);
+
+    sources.slice(0, 5).forEach((source, index) => {
+      const item = document.createElement('div');
+      item.className = 'project-rag-source';
+
+      const heading = document.createElement('strong');
+      heading.textContent = `[${index + 1}] ${source.source} · ${source.title}`;
+      item.appendChild(heading);
+
+      const preview = document.createElement('p');
+      preview.textContent = source.preview || '';
+      item.appendChild(preview);
+
+      ragSources.appendChild(item);
+    });
+    ragSources.hidden = false;
+  }
+
+  if (chatOpen && chatDialog && chatForm && chatQuestion && chatMessages) {
+    chatOpen.addEventListener('click', () => {
+      if (typeof chatDialog.showModal === 'function') {
+        chatDialog.showModal();
+      } else {
+        chatDialog.setAttribute('open', 'open');
+      }
+      chatQuestion.focus();
+    });
+
+    chatForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const question = chatQuestion.value.trim();
+      if (!question) return;
+
+      chatQuestion.value = '';
+      addChatMessage('user', question);
+      const loadingEl = addChatMessage('assistant', 'Думаю над ответом...');
+
+      const submitButton = chatForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+
+      try {
+        const response = await fetch(chatDialog.dataset.chatUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            dataset_id: chatOpen.dataset.datasetId,
+            task_id: chatOpen.dataset.taskId,
+            question,
+            history: chatHistory,
+          }),
+        });
+        const payload = await response.json();
+        if (loadingEl) loadingEl.remove();
+
+        if (!response.ok || !payload.ok) {
+          addChatMessage('assistant', payload.error || 'Не удалось получить ответ.');
+          return;
+        }
+
+        addChatMessage('assistant', payload.answer);
+        if (payload.sources && payload.sources.length) {
+          const sourceText = payload.sources
+            .slice(0, 4)
+            .map((source, index) => `[${index + 1}] ${source.source} · ${source.title}`)
+            .join('\n');
+          addChatMessage('assistant', `Источники RAG:\n${sourceText}`);
+        }
+        chatHistory.push({role: 'user', content: question});
+        chatHistory.push({role: 'assistant', content: payload.answer});
+        while (chatHistory.length > 8) chatHistory.shift();
+      } catch (error) {
+        if (loadingEl) loadingEl.remove();
+        addChatMessage('assistant', `Ошибка запроса: ${error}`);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+        chatQuestion.focus();
+      }
+    });
+  }
+
+  if (ragShell && ragForm && ragQuestion && ragMessages) {
+    ragForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const question = ragQuestion.value.trim();
+      if (!question) return;
+
+      ragQuestion.value = '';
+      addMessage(ragMessages, 'user', question);
+      const loadingEl = addMessage(ragMessages, 'assistant', 'Ищу по knowledge base и собираю ответ...');
+      renderRagSources([]);
+
+      const submitButton = ragForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+
+      try {
+        const response = await fetch(ragShell.dataset.chatUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            question,
+            history: ragHistory,
+          }),
+        });
+        const payload = await response.json();
+        if (loadingEl) loadingEl.remove();
+        renderRagSources(payload.sources || []);
+
+        if (!response.ok || !payload.ok) {
+          addMessage(ragMessages, 'assistant', payload.error || 'Не удалось получить RAG-ответ.');
+          return;
+        }
+
+        addMessage(ragMessages, 'assistant', payload.answer);
+        ragHistory.push({role: 'user', content: question});
+        ragHistory.push({role: 'assistant', content: payload.answer});
+        while (ragHistory.length > 8) ragHistory.shift();
+      } catch (error) {
+        if (loadingEl) loadingEl.remove();
+        addMessage(ragMessages, 'assistant', `Ошибка запроса: ${error}`);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+        ragQuestion.focus();
+      }
+    });
+  }
 
   if (!plotEl || !plotToolbar || !xSelect || !ySelect) return;
 

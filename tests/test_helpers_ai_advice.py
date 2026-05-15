@@ -1,8 +1,13 @@
+import json
 from pathlib import Path
 
 import pandas as pd
 
-from UI.helpers_ai_advice import build_ai_advice, build_openrouter_interpretation
+from UI.helpers_ai_advice import (
+    build_ai_advice,
+    build_openrouter_chat_answer,
+    build_openrouter_interpretation,
+)
 
 
 def _write_dataset_table(base_dir: Path, dataset_id: str, df: pd.DataFrame) -> Path:
@@ -113,9 +118,10 @@ def test_build_openrouter_interpretation_uses_fake_transport(tmp_path: Path):
     advice = build_ai_advice(tmp_path, "toy", "classification")
     captured = {}
 
-    def fake_opener(request, timeout):
+    def fake_opener(request, timeout, context):
         captured["auth"] = request.headers["Authorization"]
         captured["timeout"] = timeout
+        captured["context"] = context
         return _FakeResponse()
 
     llm = build_openrouter_interpretation(
@@ -131,6 +137,7 @@ def test_build_openrouter_interpretation_uses_fake_transport(tmp_path: Path):
     assert llm["text"] == "LLM says: choose StrongModel because metrics are best."
     assert captured["auth"] == "Bearer test-key"
     assert captured["timeout"] == 3
+    assert captured["context"] is not None
 
 
 def test_build_openrouter_interpretation_reports_missing_key(tmp_path: Path, monkeypatch):
@@ -147,3 +154,39 @@ def test_build_openrouter_interpretation_reports_missing_key(tmp_path: Path, mon
 
     assert llm["enabled"] is False
     assert "OPENROUTER_API_KEY" in llm["error"]
+
+
+def test_build_openrouter_chat_answer_includes_question_and_result_context(tmp_path: Path):
+    _write_dataset_table(
+        tmp_path,
+        "toy",
+        pd.DataFrame(
+            {
+                "method": ["WeakModel", "StrongModel"],
+                "auc_event_mean": [0.62, 0.91],
+                "logloss_event_mean": [0.55, 0.22],
+                "rmse_event_mean": [0.42, 0.18],
+            }
+        ),
+    )
+    advice = build_ai_advice(tmp_path, "toy", "classification")
+    captured = {}
+
+    def fake_opener(request, timeout, context):
+        captured["payload"] = request.data.decode("utf-8")
+        return _FakeResponse()
+
+    answer = build_openrouter_chat_answer(
+        advice,
+        "Почему выбрана StrongModel?",
+        history=[{"role": "user", "content": "Какая модель лучшая?"}],
+        api_key="test-key",
+        opener=fake_opener,
+    )
+
+    assert answer["text"] == "LLM says: choose StrongModel because metrics are best."
+    payload = json.loads(captured["payload"])
+    message_text = "\n".join(message["content"] for message in payload["messages"])
+    assert "Почему выбрана StrongModel?" in message_text
+    assert "StrongModel" in message_text
+    assert "Датасет: toy" in message_text

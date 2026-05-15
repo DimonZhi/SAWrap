@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -9,6 +10,11 @@ from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
 
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -234,18 +240,104 @@ def _build_openrouter_messages(advice: dict[str, Any]) -> list[dict[str, str]]:
             "content": (
                 "Ты ML-аналитик в веб-сервисе сравнения survival-моделей. "
                 "Объясняй строго по переданным метрикам, не выдумывай новые результаты. "
-                "Пиши кратко: 3-5 предложений, с понятным выводом для жюри конкурса."
+                "Пиши кратко: 3-5 предложений, с понятным выводом для жюри конкурса. "
+                "Если нужны формулы, пиши их в LaTeX delimiters \\( ... \\) или \\[ ... \\]."
             ),
         },
         {"role": "user", "content": user_content},
     ]
 
 
-def build_openrouter_interpretation(
+def _advice_facts(advice: dict[str, Any]) -> str:
+    top_lines = []
+    for model in advice.get("top_models", [])[:3]:
+        metrics_text = "; ".join(_compact_metric(metric) for metric in model.get("metrics", []))
+        top_lines.append(
+            f"{model['position']}. {model['method']} — score {model['score']}/100. Метрики: {metrics_text}."
+        )
+
+    reasons = "\n".join(f"- {reason}" for reason in advice.get("why", []))
+    missing = ", ".join(advice.get("missing_metrics", []) or []) or "нет"
+    available = ", ".join(advice.get("available_metrics", []) or []) or "нет"
+
+    return "\n".join(
+        [
+            f"Датасет: {advice.get('dataset_id')}",
+            f"Задача: {advice.get('task_label')}",
+            f"Рекомендованная модель: {advice.get('recommended_method')}",
+            f"Итоговая оценка: {advice.get('score')}/100",
+            f"Доступные метрики: {available}",
+            f"Отсутствующие метрики: {missing}",
+            "Локальное объяснение:",
+            reasons,
+            "Топ моделей:",
+            *top_lines,
+        ]
+    )
+
+
+def format_ai_advice_context(advice: dict[str, Any]) -> str:
+    return _advice_facts(advice)
+
+
+def format_ai_advice_context(advice: dict[str, Any]) -> str:
+    return _advice_facts(advice)
+
+
+def _normalize_chat_history(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    normalized = []
+    for item in (history or [])[-8:]:
+        role = str(item.get("role", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        normalized.append({"role": role, "content": content[:1200]})
+    return normalized
+
+
+def _build_openrouter_chat_messages(
     advice: dict[str, Any],
+    question: str,
+    history: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты ML-аналитик внутри SAWrap. Отвечай на уточняющие вопросы только по переданным "
+                "метрикам и результатам. Если данных недостаточно, прямо скажи, каких метрик или "
+                "экспериментов не хватает. Не меняй победителя без объяснения по метрикам. "
+                "Ответ должен быть на русском, краткий и прикладной. "
+                "Если нужны формулы, пиши их в LaTeX delimiters \\( ... \\) или \\[ ... \\]."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Контекст результата:\n"
+                f"{_advice_facts(advice)}\n\n"
+                "Используй этот контекст для последующего диалога."
+            ),
+        },
+    ]
+    messages.extend(_normalize_chat_history(history))
+    messages.append({"role": "user", "content": question[:1600]})
+    return messages
+
+
+def _ssl_context():
+    if certifi is not None:
+        return ssl.create_default_context(cafile=certifi.where())
+    return ssl.create_default_context()
+
+
+def _call_openrouter(
+    messages: list[dict[str, str]],
     *,
     api_key: str | None = None,
     model: str | None = None,
+    max_tokens: int = 420,
+    temperature: float = 0.2,
     timeout: float = 20.0,
     opener=urlopen,
 ) -> dict[str, Any]:
@@ -265,9 +357,9 @@ def build_openrouter_interpretation(
 
     payload = {
         "model": selected_model,
-        "messages": _build_openrouter_messages(advice),
-        "temperature": 0.2,
-        "max_tokens": 420,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
     headers = {
         "Authorization": f"Bearer {key}",
@@ -284,7 +376,7 @@ def build_openrouter_interpretation(
     )
 
     try:
-        with opener(request, timeout=timeout) as response:
+        with opener(request, timeout=timeout, context=_ssl_context()) as response:
             response_payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         try:
@@ -305,6 +397,55 @@ def build_openrouter_interpretation(
 
     result["text"] = str(text).strip()
     return result
+
+
+def build_openrouter_interpretation(
+    advice: dict[str, Any],
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    timeout: float = 20.0,
+    opener=urlopen,
+) -> dict[str, Any]:
+    return _call_openrouter(
+        _build_openrouter_messages(advice),
+        api_key=api_key,
+        model=model,
+        max_tokens=420,
+        temperature=0.2,
+        timeout=timeout,
+        opener=opener,
+    )
+
+
+def build_openrouter_chat_answer(
+    advice: dict[str, Any],
+    question: str,
+    history: list[dict[str, Any]] | None = None,
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    timeout: float = 20.0,
+    opener=urlopen,
+) -> dict[str, Any]:
+    if not question.strip():
+        return {
+            "enabled": bool(api_key or os.getenv("OPENROUTER_API_KEY")),
+            "provider": "OpenRouter",
+            "model": model or os.getenv("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL,
+            "text": None,
+            "error": "Вопрос пустой.",
+        }
+
+    return _call_openrouter(
+        _build_openrouter_chat_messages(advice, question, history),
+        api_key=api_key,
+        model=model,
+        max_tokens=520,
+        temperature=0.2,
+        timeout=timeout,
+        opener=opener,
+    )
 
 
 def build_ai_advice(base_dir: Path, dataset_id: str, task_id: str, use_llm: bool = False) -> dict[str, Any]:

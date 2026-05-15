@@ -52,8 +52,42 @@ AI-интерпретатор:
 - читает предрассчитанную таблицу UI/tables/<dataset>.xlsx
 - считает итоговую оценку модели по направлению метрик и объясняет, почему выбран топовый метод
 - если задан OPENROUTER_API_KEY, дополнительно получает текстовую интерпретацию от OpenRouter
+- после получения рекомендации можно открыть диалоговое окно и задать уточняющий вопрос RAG-агенту по всему проекту
 - модель по умолчанию: openai/gpt-4o-mini
 - можно заменить модель через OPENROUTER_MODEL
+
+RAG-ассистент по проекту:
+- форма находится на главной странице под AI-интерпретатором
+- ищет релевантные фрагменты в knowledge/*.md, README, ключевых файлах кода и таблицах UI/tables
+- отправляет найденный контекст во внешнюю LLM через OpenRouter
+- отвечает на вопросы по диплому, архитектуре, экспериментам, продуктовой части и критериям конкурса
+- показывает источники, на которые опирался ответ
+- если OPENROUTER_API_KEY не задан, показывает найденный локальный контекст без LLM-обобщения
+
+Векторный RAG-индекс:
+- строится один раз локально и сохраняется в UI/rag_index
+- по умолчанию использует локальные semantic embeddings через sentence-transformers
+- fallback-режим использует TF-IDF-векторизацию через scikit-learn без внешних embedding API
+- включает knowledge/*.md, README, ключевые .py файлы, таблицы UI/tables и LaTeX-диплом из SAWRAP_THESIS_DIR
+- если индекс есть, RAG сначала ищет по векторному индексу; если индекса нет, использует обычный keyword fallback
+- UI/rag_index добавлен в .gitignore, чтобы случайно не залить полный текст диплома в GitHub
+
+Установить зависимости для semantic embeddings:
+python3 -m pip install -r requirements-embeddings.txt
+
+Собрать индекс:
+python3 scripts/build_rag_index.py
+
+Собрать TF-IDF fallback-индекс без sentence-transformers:
+python3 scripts/build_rag_index.py --retriever tfidf
+
+Если диплом лежит в другой папке:
+SAWRAP_THESIS_DIR="/path/to/ДипломML_SA-3" python3 scripts/build_rag_index.py
+
+Модель embeddings по умолчанию:
+intfloat/multilingual-e5-small
+
+Для Docker с embeddings: установить requirements-embeddings.txt в образ или заранее адаптировать Dockerfile, затем собрать индекс и docker build. Папка UI/rag_index попадет в образ вместе с UI.
 
 OpenRouter:
 0. пример переменных лежит в .env.example, реальный .env уже игнорируется git
