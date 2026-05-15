@@ -97,6 +97,127 @@
   </section>
 </form>
 
+<section class="card ai-card">
+  <div class="section-heading">
+    <div>
+      <h2>AI-интерпретатор</h2>
+      <p>Рекомендация модели по датасету, задаче и доступным метрикам.</p>
+    </div>
+  </div>
+
+  <form action="{{ url_for('ai_advice') }}" method="post" class="ai-form">
+    <label class="plot-control">
+      <span>Датасет</span>
+      <select name="ai_dataset_id" class="input-field">
+        {% for ds in datasets %}
+          <option value="{{ ds.id }}"
+            {% if ai_selected and ai_selected.dataset_id == ds.id %}selected{% endif %}>
+            {{ ds.label }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="plot-control">
+      <span>Задача</span>
+      <select name="ai_task_id" class="input-field">
+        {% for task in ai_tasks %}
+          <option value="{{ task.id }}"
+            {% if ai_selected and ai_selected.task_id == task.id %}selected{% endif %}>
+            {{ task.label }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <button type="submit" class="btn btn-primary ai-submit">Получить совет</button>
+  </form>
+
+  {% if ai_advice %}
+    {% if ai_advice.has_result %}
+      <div class="ai-result">
+        <div class="ai-recommendation">
+          <span class="ai-kicker">{{ ai_advice.task_label }}</span>
+          <h3>{{ ai_advice.recommended_method }}</h3>
+          <p>{{ ai_advice.summary }}</p>
+          <span class="ai-score">{{ ai_advice.score }}/100</span>
+        </div>
+
+        <div class="ai-explain-grid">
+          <div>
+            <h4>Почему</h4>
+            <ul class="ai-reasons">
+              {% for reason in ai_advice.why %}
+                <li>{{ reason }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+
+          <div>
+            <h4>Топ-3</h4>
+            <div class="ai-top-list">
+              {% for model in ai_advice.top_models %}
+                <div class="ai-top-row">
+                  <span class="ai-top-position">{{ model.position }}</span>
+                  <span class="ai-top-method">{{ model.method }}</span>
+                  <span class="ai-top-score">{{ model.score }}/100</span>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        {% if ai_advice.llm and ai_advice.llm.text %}
+          <div class="ai-llm-box">
+            <div class="ai-llm-heading">
+              <h4>LLM-интерпретация</h4>
+              <span>{{ ai_advice.llm.provider }} · {{ ai_advice.llm.model }}</span>
+            </div>
+            <p>{{ ai_advice.llm.text }}</p>
+          </div>
+        {% elif ai_advice.llm and ai_advice.llm.error %}
+          <p class="ai-note">{{ ai_advice.llm.error }}</p>
+        {% endif %}
+
+        <div class="ai-metrics-table-wrap">
+          <table class="ai-metrics-table">
+            <thead>
+              <tr>
+                <th>Метрика</th>
+                <th>Значение</th>
+                <th>Направление</th>
+                <th>Позиция</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for metric in ai_advice.top_models[0].metrics %}
+                <tr>
+                  <td>{{ metric.label }}</td>
+                  <td>{{ metric.value }}</td>
+                  <td>{{ metric.direction_label }}</td>
+                  <td>
+                    {% if metric.position %}
+                      {{ metric.position }} из {{ metric.total }}
+                    {% else %}
+                      нет данных
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if ai_advice.missing_metrics %}
+          <p class="ai-note">Не использованы отсутствующие метрики: {{ ai_advice.missing_metrics | join(", ") }}.</p>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="empty-state">{{ ai_advice.error }}</p>
+    {% endif %}
+  {% endif %}
+</section>
+
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-top:0;font-size:18px;">График метрик (Plotly)</h2>
   <div class="plot-toolbar" id="plot-toolbar">

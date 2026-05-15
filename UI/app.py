@@ -10,7 +10,7 @@ from pathlib import Path
 from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 import survivors.datasets as ds
 import survivors.constants as cnt
-from ..metrics_sa import eval_classification_model, eval_regression_model, eval_survival_model
+from .helpers_ai_advice import AI_TASKS, build_ai_advice
 from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics
 from .helpers_leaderboard import load_leaderboard_images, load_overall_leaderboard_rows
 
@@ -147,21 +147,55 @@ def wrap_model(raw_model, task: str):
     raise ValueError(task)
 
 
+def home_context(request: Request, **overrides):
+    context = {
+        "request": request,
+        "messages": [],
+        "datasets": DATASETS,
+        "presets": PRESETS,
+        "models": MODELS,
+        "selected": None,
+        "plot_data": None,
+        "plot_json": None,
+        "metrics_list": [],
+        "ai_tasks": AI_TASKS,
+        "ai_selected": {
+            "dataset_id": DATASETS[0]["id"],
+            "task_id": "survival",
+        },
+        "ai_advice": None,
+    }
+    context.update(overrides)
+    return context
+
+
 @app.get("/", name="home")
 async def home(request: Request):
     return templates.TemplateResponse(
         request,
         "home.html",
-        {
-            "request": request,
-            "messages": [],
-            "datasets": DATASETS,
-            "presets": PRESETS,
-            "models": MODELS,
-            "selected": None,
-            "plot_data": None,
-            "metrics_list": [],
-        },
+        home_context(request),
+    )
+
+
+@app.post("/ai-advice", name="ai_advice")
+async def ai_advice(
+    request: Request,
+    ai_dataset_id: str = Form(...),
+    ai_task_id: str = Form(...),
+):
+    advice = build_ai_advice(BASE_DIR, ai_dataset_id, ai_task_id, use_llm=True)
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        home_context(
+            request,
+            ai_selected={
+                "dataset_id": ai_dataset_id,
+                "task_id": ai_task_id,
+            },
+            ai_advice=advice,
+        ),
     )
 
 
@@ -188,20 +222,18 @@ async def compare_models(
 
     
     if preset is None:
-        return templates.TemplateResponse(request, "home.html", {
-            "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
-            "selected": selected, "plot_json": None,
-            "messages": [{"category":"error","text":"Пресет не найден"}],  
-            "metrics_list": [],
-        })
+        return templates.TemplateResponse(request, "home.html", home_context(
+            request,
+            selected=selected,
+            messages=[{"category":"error","text":"Пресет не найден"}],
+        ))
 
     if not model_ids:
-        return templates.TemplateResponse(request, "home.html", {
-            "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
-            "selected": selected, "plot_json": None,
-            "messages": [{"category":"error","text":"Выбери хотя бы одну модель"}], 
-            "metrics_list": [],
-        })
+        return templates.TemplateResponse(request, "home.html", home_context(
+            request,
+            selected=selected,
+            messages=[{"category":"error","text":"Выбери хотя бы одну модель"}],
+        ))
 
     allow_recompute = not DISABLE_MISSING_RECALC
     selected_cfgs = [m for m in MODELS if m["id"] in model_ids]
@@ -210,12 +242,11 @@ async def compare_models(
     if allow_recompute:
         load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
         if load_fn is None:
-            return templates.TemplateResponse(request, "home.html", {
-                "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
-                "selected": selected, "plot_json": None,
-                "messages": [{"category":"error","text":f"Нет загрузчика датасета: load_{dataset_id}_dataset()"}],
-                "metrics_list": [],
-            })
+            return templates.TemplateResponse(request, "home.html", home_context(
+                request,
+                selected=selected,
+                messages=[{"category":"error","text":f"Нет загрузчика датасета: load_{dataset_id}_dataset()"}],
+            ))
         X, y, features, categ, sch_nan = load_fn()
 
     errors = []
@@ -269,12 +300,11 @@ async def compare_models(
         labels.append(mcfg["label"])
 
     if not labels:
-        return templates.TemplateResponse(request, "home.html", {
-            "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
-            "selected": selected, "plot_json": None,
-            "messages": [{"category":"error","text":"Не построено ни одной точки: " + (" | ".join(errors[:3]) if errors else "")}],
-            "metrics_list": [],
-        })
+        return templates.TemplateResponse(request, "home.html", home_context(
+            request,
+            selected=selected,
+            messages=[{"category":"error","text":"Не построено ни одной точки: " + (" | ".join(errors[:3]) if errors else "")}],
+        ))
     plot_data = {
         "labels": labels,
         "metrics": metrics_list,        
@@ -285,11 +315,13 @@ async def compare_models(
 
     msgs = [{"category":"error","text":" | ".join(errors[:3])}] if errors else []
 
-    return templates.TemplateResponse(request, "home.html", {
-        "request": request, "datasets": DATASETS, "presets": PRESETS, "models": MODELS,
-        "selected": selected, "plot_data": plot_data,
-        "messages": msgs, "metrics_list": metrics_list,
-    })
+    return templates.TemplateResponse(request, "home.html", home_context(
+        request,
+        selected=selected,
+        plot_data=plot_data,
+        messages=msgs,
+        metrics_list=metrics_list,
+    ))
 
 
 @app.get("/goal", name="goal_page")

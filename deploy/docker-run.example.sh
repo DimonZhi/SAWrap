@@ -22,6 +22,8 @@ docker run -d \
   --memory="800m" \
   --pids-limit=128 \
   -e SAWRAP_SKIP_MISSING_RECALC=1 \
+  -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
+  -e OPENROUTER_MODEL="${OPENROUTER_MODEL:-openai/gpt-4o-mini}" \
   -e OMP_NUM_THREADS=1 \
   -e OPENBLAS_NUM_THREADS=1 \
   -e MKL_NUM_THREADS=1 \

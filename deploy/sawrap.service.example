@@ -12,6 +12,9 @@ WorkingDirectory=/srv
 
 Environment=PYTHONUNBUFFERED=1
 Environment=SAWRAP_SKIP_MISSING_RECALC=1
+# Set the key on the server if you want external LLM explanations.
+# Environment=OPENROUTER_API_KEY=sk-or-v1-...
+Environment=OPENROUTER_MODEL=openai/gpt-4o-mini
 # Uncomment if you publish the app under a path like /sawrap
 # Environment=SAWRAP_ROOT_PATH=/sawrap
 
