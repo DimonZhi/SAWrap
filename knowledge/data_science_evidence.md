@@ -20,7 +20,7 @@
 - регрессия: ElasticNet, SVR, KNeighborsRegressor, DecisionTreeRegressor, RandomForestRegressor, GradientBoostingRegressor;
 - survival analysis: KaplanMeierFitter, CoxPHSurvivalAnalysis, SurvivalTree, RandomSurvivalForest, GradientBoostingSurvivalAnalysis, CRAID, ParallelBootstrapCRAID.
 
-Piecewise-модели планируется добавить позже как отдельное расширение survival-семейства.
+Piecewise-модели добавлены как отдельное расширение классификационного семейства: `PiecewiseClassifWrapSA` и `PiecewiseCensorAwareClassifWrapSA` используют `times=16` и строят интервальную survival-кривую на основе базового классификатора.
 
 ## Метрики
 

@@ -11,8 +11,24 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented*")
 
 
+PIECEWISE_TABLE_FILES = {
+    "actg": "Piecewise_actg.xlsx",
+    "framingham": "Piecewise_framingham.xlsx",
+    "gbsg": "Piecewise_gbsg.xlsx",
+    "pbc": "Piesewise_pbc.xlsx",
+    "rott2": "Piecewise_rott2.xlsx",
+    "smarto": "Piecewise_smarto.xlsx",
+    "support2": "Piecewise_support2.xlsx",
+}
+
+
 def _norm(s: str) -> str:
     return str(s).strip().lower()
+
+
+def is_piecewise_model_label(model_label: str) -> bool:
+    label = str(model_label).strip()
+    return label.startswith("PiecewiseClassifWrapSA(") or label.startswith("PiecewiseCensorAwareClassifWrapSA(")
 
 def import_class(path: str):
     module_name, class_name = path.rsplit(".", 1)
@@ -29,6 +45,18 @@ def get_surv_table_path(base_dir: Path, dataset_id: str) -> Path:
         if p.exists():
             return p.resolve()
     return cands[0].resolve()
+
+
+def get_piecewise_table_path(base_dir: Path, dataset_id: str) -> Path:
+    key = str(dataset_id).strip().lower()
+    filename = PIECEWISE_TABLE_FILES.get(key, f"Piecewise_{key}.xlsx")
+    return (base_dir / "tables" / filename).resolve()
+
+
+def get_metric_table_path(base_dir: Path, dataset_id: str, model_label: str | None = None) -> Path:
+    if model_label and is_piecewise_model_label(model_label):
+        return get_piecewise_table_path(base_dir, dataset_id)
+    return get_surv_table_path(base_dir, dataset_id)
 
 def normalize_surv_df(df: pd.DataFrame):
     if df is None or not isinstance(df, pd.DataFrame):
@@ -215,7 +243,7 @@ def get_surv_metrics(
     y_metric: str,
     allow_recompute: bool = True,
 ):
-    table_path = get_surv_table_path(base_dir, dataset_id)
+    table_path = get_metric_table_path(base_dir, dataset_id, model_label)
     df = load_surv_df(table_path)
 
     vx = lookup_metric(df, model_label, x_metric)
@@ -228,6 +256,8 @@ def get_surv_metrics(
         need.append(x_metric)
     if vy is None and _norm(y_metric) != _norm(x_metric):
         need.append(y_metric)
+    if is_piecewise_model_label(model_label):
+        return vx, vy, table_path
     if (not allow_recompute) or (not need) or (X_tr is None) or (y_tr is None) or (not model_cfgs):
         return vx, vy, table_path
     supplement_surv_table_missing(
@@ -244,17 +274,30 @@ def get_surv_metrics(
     vy = lookup_metric(df, model_label, y_metric)
     return vx, vy, table_path
 
-def list_surv_metrics_from_table(base_dir: Path, dataset_id: str):
-    table_path = get_surv_table_path(base_dir, dataset_id)
-    if not table_path.exists():
+def list_surv_metrics_from_table(base_dir: Path, dataset_id: str, model_label: str | None = None):
+    if model_label:
+        table_paths = [get_metric_table_path(base_dir, dataset_id, model_label)]
+    else:
+        table_paths = [get_surv_table_path(base_dir, dataset_id)]
+        piecewise_path = get_piecewise_table_path(base_dir, dataset_id)
+        if piecewise_path.exists():
+            table_paths.append(piecewise_path)
+
+    frames = []
+    metric_keys = set()
+    for table_path in table_paths:
+        if not table_path.exists():
+            continue
+        df = pd.read_excel(table_path)
+        df = df.rename(columns={c: _norm(c) for c in df.columns})
+        metric_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_mean")]
+        for c in metric_cols:
+            s = pd.to_numeric(df[c], errors="coerce")
+            if s.notna().any():
+                metric_keys.add(c[:-5])
+        frames.append(df)
+
+    if not frames:
         return [], pd.DataFrame(columns=["method"])
-    df = pd.read_excel(table_path)
-    df = df.rename(columns={c: _norm(c) for c in df.columns})
-    metric_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_mean")]
-    metric_keys = []
-    for c in metric_cols:
-        s = pd.to_numeric(df[c], errors="coerce")
-        if s.notna().any():
-            metric_keys.append(c[:-5])
-    metric_keys = sorted(metric_keys)
-    return metric_keys, df
+
+    return sorted(metric_keys), pd.concat(frames, ignore_index=True, sort=False)

@@ -15,9 +15,10 @@
   <div class="overview-tabbar" role="tablist" aria-label="Разделы проекта">
     <button class="overview-tab is-active" type="button" data-tab="goal">Цель проекта</button>
     <button class="overview-tab" type="button" data-tab="methodology">Методология разработки</button>
+    <button class="overview-tab" type="button" data-tab="models">Модели</button>
     <button class="overview-tab" type="button" data-tab="experiment">Экспериментальный сценарий</button>
     <button class="overview-tab" type="button" data-tab="results">Результаты</button>
-    <button class="overview-tab" type="button" data-tab="usage">Как использовать</button>
+    <button class="overview-tab" type="button" data-tab="usage">Сценарии использования</button>
   </div>
 
   <article class="overview-panel is-active" data-panel="goal" id="goal">
@@ -25,32 +26,153 @@
       <div>
         <span class="overview-kicker">Цель и научная идея</span>
         <h2>Единое survival-представление для моделей разных классов</h2>
-        <p>
-          Цель проекта - разработать и экспериментально проверить схему унификации
-          откликов моделей классификации, регрессии и анализа выживаемости для задач
-          прогнозирования терминальных событий.
+        <p class="definition-note">
+          <strong>Терминальное событие</strong> - это событие, после которого наблюдение
+          за объектом прекращается или теряет исходный смысл. В таких задачах важны
+          и сам факт события, и время до его наступления.
         </p>
         <p>
-          В таких задачах важно учитывать не только факт события, но и время до него:
-          часть наблюдений может быть правоцензурированной, то есть событие не наступило
-          до окончания наблюдения. Поэтому прямое сравнение классификатора, регрессора
-          и survival-модели становится неоднозначным.
+          В задачах прогнозирования терминальных событий нужно оценивать не только
+          факт наступления события, но и время до него. Из-за этого модели разных
+          классов дают несопоставимые ответы: классификация возвращает вероятность
+          события, регрессия - ожидаемое время, а анализ выживаемости - функцию
+          выживания.
+        </p>
+        <p>
+          Дополнительная сложность возникает из-за цензурированных, неполных данных.
+          Если использовать такие данные как обычную таблицу, классификация может
+          ошибочно считать цензурированные объекты отсутствием события, а регрессия
+          часто вынуждена исключать их из обучения, потому что точное время события
+          неизвестно. Поэтому прямое сравнение таких моделей становится некорректным.
+        </p>
+        <p>
+          Цель проекта - разработать и экспериментально проверить схему, которая
+          приводит прогнозы классификации, регрессии и анализа выживаемости к единому
+          представлению через функцию выживания.
+        </p>
+        <p class="definition-note">
+          <strong>Цензурированное наблюдение</strong> - это наблюдение, для которого целевое
+          событие не наступило в пределах периода исследования, поэтому точное время
+          его наступления неизвестно.
         </p>
         <div class="formula-card">
           <span>Общее представление</span>
           <div class="formula-render">\[S(t \mid X)=P(T>t \mid X)\]</div>
-          <code>S(t | X) = P(T &gt; t | X)</code>
+        </div>
+        <div class="formula-card">
+          <span>Piecewise-times расширение</span>
+          <p>
+            Обычный классификатор дает одну вероятность события на весь горизонт.
+            Piecewise-times делит время на интервалы и обучает классификационный
+            риск для каждого интервала, поэтому прогноз становится ближе к survival-кривой.
+          </p>
+          <div class="formula-render">\[\widehat S(t_k\mid X)=\prod_{j=1}^{k}\left(1-\widehat p_j(X)\right)\]</div>
+          <p>
+            В интерфейсе и итоговом leaderboard используется стабильный режим
+            <code>times=16</code>. Для <code>DecisionTreeClassifier</code> это дало
+            средний прирост classification score на <strong>+26.8</strong> пункта
+            по 7 датасетам.
+          </p>
         </div>
       </div>
       <div class="overview-proof-card">
-        <h3>Задачи исследования</h3>
-        <ul>
-          <li>Описать classification, regression и survival-постановки.</li>
-          <li>Сформулировать правила приведения прогнозов \(\widehat P(X)\), \(\widehat T(X)\) и \(\widehat S(t\mid X)\).</li>
-          <li>Реализовать адаптеры для моделей разных классов.</li>
-          <li>Провести сравнение на открытых медицинских наборах данных.</li>
-          <li>Проанализировать итоговое ранжирование методов.</li>
-        </ul>
+        <h3>Где встречаются терминальные события</h3>
+        <div class="mini-table-wrap">
+          <table class="mini-data-table">
+            <thead>
+              <tr>
+                <th>Сфера</th>
+                <th>Терминальное событие</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Медицина</td>
+                <td>летальный исход, развитие заболевания</td>
+              </tr>
+              <tr>
+                <td>Инженерия</td>
+                <td>отказ оборудования</td>
+              </tr>
+              <tr>
+                <td>Финансы</td>
+                <td>уход клиента, дефолт</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="overview-table-block">
+      <h3>Три постановки задачи и работа с цензурированием</h3>
+      <div class="overview-table-wrap">
+        <table class="overview-data-table">
+          <thead>
+            <tr>
+              <th>Подход</th>
+              <th>Прогнозируемая величина</th>
+              <th>Формальная постановка</th>
+              <th>Работа с цензурированием</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Классификация</td>
+              <td>Вероятность наступления события</td>
+              <td>\(X \to \widehat P(X)\)</td>
+              <td>Цензурированные наблюдения учитываются как отсутствие события к заданному горизонту.</td>
+            </tr>
+            <tr>
+              <td>Регрессия</td>
+              <td>Ожидаемое время до события</td>
+              <td>\(X \to \widehat T(X)\)</td>
+              <td>Цензурированные наблюдения исключаются, так как точное время события неизвестно.</td>
+            </tr>
+            <tr>
+              <td>Анализ выживаемости</td>
+              <td>Функция выживаемости</td>
+              <td>\(X \to \widehat S(t\mid X)=P(T>t\mid X)\)</td>
+              <td>Корректно учитывает цензурированные наблюдения.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="overview-table-block">
+      <h3>Единое представление прогнозов</h3>
+      <div class="overview-table-wrap">
+        <table class="overview-data-table">
+          <thead>
+            <tr>
+              <th>Задача</th>
+              <th>\(\widehat P(X)\)</th>
+              <th>\(\widehat T(X)\)</th>
+              <th>\(\widehat S(t\mid X)\)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Классификация</td>
+              <td class="source-forecast">исходный прогноз</td>
+              <td>\(\int_{0}^{t_{\max}}\widehat S(t\mid X)\,dt\)</td>
+              <td>\(1-\widehat P(X)\)</td>
+            </tr>
+            <tr>
+              <td>Регрессия</td>
+              <td>\(1-\widehat S(t_{\max}\mid X)\)</td>
+              <td class="source-forecast">исходный прогноз</td>
+              <td>\(\mathbb{I}(t<\widehat T(X))\)</td>
+            </tr>
+            <tr>
+              <td>Анализ выживаемости</td>
+              <td>\(1-\widehat S(t_{\max}\mid X)\)</td>
+              <td>\(\int_{0}^{t_{\max}}\widehat S(t\mid X)\,dt\)</td>
+              <td class="source-forecast">исходный прогноз</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </article>
@@ -67,7 +189,7 @@
     <div class="criteria-grid">
       <div class="criteria-card">
         <h3>Адаптеры моделей</h3>
-        <p><code>ClassifWrapSA</code>, <code>RegrWrapSA</code> и <code>SAWrapSA</code> приводят разные типы прогнозов к общей survival-схеме.</p>
+        <p><code>ClassifWrapSA</code>, <code>RegrWrapSA</code> и <code>SAWrapSA</code> приводят разные типы прогнозов к общей survival-схеме. Адаптеры встроенты в Python-библиотеку <a href="https://github.com/iuliivasilev/dev-survivors" target="_blank">survivors</a></p>
       </div>
       <div class="criteria-card">
         <h3>Backend и интерфейс</h3>
@@ -84,56 +206,338 @@
     </div>
   </article>
 
+  <article class="overview-panel" data-panel="models" id="models">
+    <span class="overview-kicker">Модели и адаптеры</span>
+    <h2>Использованные модели</h2>
+    <p>
+      В исследовании сравниваются модели трех постановок: классификация события,
+      прогноз времени и анализ выживаемости. Все они приводятся к единому survival-интерфейсу,
+      а Piecewise-times расширяет именно классификационные адаптеры.
+    </p>
+
+    <div class="overview-table-block">
+      <h3>Использованные модели</h3>
+      <div class="overview-table-wrap">
+        <table class="overview-data-table models-table">
+          <thead>
+            <tr>
+              <th>Блок задачи</th>
+              <th>Класс моделей</th>
+              <th>Модели</th>
+              <th>Принцип работы</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Классификация</td>
+              <td>Линейные</td>
+              <td>Logistic Regression</td>
+              <td>Используют линейную зависимость прогноза от признаков объекта.</td>
+            </tr>
+            <tr>
+              <td>Классификация</td>
+              <td>Метрические</td>
+              <td>k-Nearest Neighbors, Support Vector Classifier</td>
+              <td>Основаны на мере близости объектов и учитывают локальную структуру данных.</td>
+            </tr>
+            <tr>
+              <td>Классификация</td>
+              <td>Древовидные и ансамблевые</td>
+              <td>Decision Tree, Random Forest, Gradient Boosting</td>
+              <td>Разбивают пространство признаков на области и объединяют деревья для устойчивого прогноза.</td>
+            </tr>
+            <tr>
+              <td>Регрессия</td>
+              <td>Линейные</td>
+              <td>Linear Regression, Elastic Net</td>
+              <td>Строят числовой прогноз времени события как функцию признаков.</td>
+            </tr>
+            <tr>
+              <td>Регрессия</td>
+              <td>Метрические и ядерные</td>
+              <td>k-Nearest Neighbors Regressor, Support Vector Regression</td>
+              <td>Используют локальную структуру данных или ядерное преобразование признаков.</td>
+            </tr>
+            <tr>
+              <td>Регрессия</td>
+              <td>Древовидные и ансамблевые</td>
+              <td>Decision Tree Regressor, Random Forest Regressor, Gradient Boosting Regressor</td>
+              <td>Формируют прогноз времени по деревьям решений и их ансамблям.</td>
+            </tr>
+            <tr>
+              <td>Анализ выживаемости</td>
+              <td>Непараметрические</td>
+              <td>Kaplan-Meier</td>
+              <td>Оценивают функцию выживаемости по наблюдаемым временам событий без использования признаков.</td>
+            </tr>
+            <tr>
+              <td>Анализ выживаемости</td>
+              <td>Полупараметрические</td>
+              <td>Cox Proportional Hazards</td>
+              <td>Оценивают влияние признаков на риск при предположении постоянного отношения рисков.</td>
+            </tr>
+            <tr>
+              <td>Анализ выживаемости</td>
+              <td>Древовидные</td>
+              <td>Survival Tree, CRAID</td>
+              <td>Разбивают пространство признаков на группы с различной структурой выживаемости.</td>
+            </tr>
+            <tr>
+              <td>Анализ выживаемости</td>
+              <td>Ансамблевые</td>
+              <td>Random Survival Forest, Gradient Boosting Survival Analysis, Parallel Bootstrap CRAID</td>
+              <td>Объединяют несколько survival-моделей для устойчивой оценки риска и функции выживаемости.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="overview-table-block">
+      <h3>Piecewise-times для классификации</h3>
+      <p>
+        <code>PiecewiseClassifWrapSA</code> и <code>PiecewiseCensorAwareClassifWrapSA</code>
+        превращают классификационную модель в набор интервальных классификаторов.
+        Каждый интервал оценивает условную вероятность события, а survival-кривая
+        строится как произведение вероятностей пережить интервалы. В текущей версии
+        используется единая настройка: <code>times={{ piecewise_summary.times_tested if piecewise_summary else "16" }}</code>.
+      </p>
+
+      {% if piecewise_summary and piecewise_summary.available %}
+      <div class="piecewise-kpis">
+        {% for card in piecewise_summary.summary_cards %}
+        <div class="piecewise-kpi">
+          <span>{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <p>{{ card.caption }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="overview-note">{{ piecewise_summary.score_note }}</p>
+
+      <div class="overview-table-wrap">
+        <table class="overview-data-table piecewise-table">
+          <thead>
+            <tr>
+              <th>Базовая модель</th>
+              <th>Датасетов</th>
+              <th>Base score</th>
+              <th>Piecewise score</th>
+              <th>Δ score</th>
+              <th>Win-rate</th>
+              <th>times</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in piecewise_summary.model_rows %}
+            <tr{% if row.is_strong %} class="is-top-row"{% endif %}>
+              <td>{{ row.model }}</td>
+              <td>{{ row.datasets }}</td>
+              <td>{{ row.base_score }}</td>
+              <td>{{ row.piecewise_score }}</td>
+              <td>{% if not row.delta_score.startswith("-") %}+{% endif %}{{ row.delta_score }}</td>
+              <td>{{ row.win_rate }}%</td>
+              <td>{{ row.best_times }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="overview-table-block">
+        <h3>Сильный эффект на DecisionTreeClassifier</h3>
+        <div class="overview-table-wrap">
+          <table class="overview-data-table piecewise-table">
+            <thead>
+              <tr>
+                <th>Датасет</th>
+                <th>Base score</th>
+                <th>Piecewise score</th>
+                <th>Δ score</th>
+                <th>times</th>
+                <th>Вариант</th>
+                <th>Δ AUC, п.п.</th>
+                <th>LogLoss ↓</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in piecewise_summary.detail_rows %}
+              <tr>
+                <td>{{ row.dataset }}</td>
+                <td>{{ row.base_score }}</td>
+                <td>{{ row.piecewise_score }}</td>
+                <td>+{{ row.delta_score }}</td>
+                <td>{{ row.times }}</td>
+                <td>{{ row.variant_label }}</td>
+                <td>{% if not row.auc_delta.startswith("-") %}+{% endif %}{{ row.auc_delta }}</td>
+                <td>{{ row.logloss_reduction }}%</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <p class="empty-state">Piecewise-таблицы не найдены или не удалось посчитать сравнение.</p>
+      {% endif %}
+    </div>
+  </article>
+
   <article class="overview-panel" data-panel="experiment" id="experiment">
     <span class="overview-kicker">Эксперимент</span>
     <h2>Экспериментальный сценарий</h2>
     <div class="timeline">
       <div class="timeline-step">
-        <strong>1. Данные</strong>
-        <p>Используются ACTG, GBSG, PBC, Rott2, Smarto, Framingham и Support2. Для каждого набора важны размер, признаки, объект прогноза и доля цензурирования.</p>
+        <strong>1. Разбиение данных</strong>
+        <p>Исходный набор разбивается на обучающую и тестовую выборки.</p>
       </div>
       <div class="timeline-step">
-        <strong>2. Модели</strong>
-        <p>Сравниваются 19 методов: классификаторы, регрессоры и survival-модели, включая CoxPHSurvivalAnalysis, RandomSurvivalForest, CRAID и ParallelBootstrapCRAID.</p>
+        <strong>2. Адаптация прогнозов</strong>
+        <p>Прогнозы моделей приводятся к единой постановке через survival-представление.</p>
       </div>
       <div class="timeline-step">
-        <strong>3. Метрики</strong>
-        <p>Оцениваются 12 метрик в трех блоках: событие, время события и функция выживаемости.</p>
+        <strong>3. Подбор гиперпараметров</strong>
+        <p>Лучшие гиперпараметры выбираются по сетке на 5-кратной кросс-валидации на обучающей выборке.</p>
       </div>
       <div class="timeline-step">
-        <strong>4. Валидация и агрегация</strong>
-        <p>Для подбора гиперпараметров используется 5-кратная кросс-валидация, затем лучшие конфигурации проверяются на серии из 20 разбиений.</p>
+        <strong>4. Проверка устойчивости</strong>
+        <p>Лучшие модели обучаются и валидируются в едином сценарии на 20 различных разбиениях данных.</p>
+      </div>
+      <div class="timeline-step">
+        <strong>5. Сравнение по метрикам</strong>
+        <p>Модели сравниваются по метрикам трех типов: событие, время события и функция выживания.</p>
+      </div>
+      <div class="timeline-step">
+        <strong>6. Итоговая таблица лидеров</strong>
+        <p>Модели ранжируются по значениям метрик, ранги агрегируются по наборам данных и постановкам медианным рангом, затем общий leaderboard строится по среднему рангу.</p>
       </div>
     </div>
 
-    <div class="metrics-grid">
-      <div class="formula-card">
-        <span>Классификация события</span>
-        <p><code>AUC_EVENT</code>, <code>LOGLOSS_EVENT</code>, <code>RMSE_EVENT</code></p>
-      </div>
-      <div class="formula-card">
-        <span>Прогноз времени</span>
-        <p><code>RMSE_TIME</code>, <code>R2_TIME</code>, <code>MAPE_TIME</code>, <code>SPEARMAN_TIME</code>, <code>RMSLE_TIME</code></p>
-      </div>
-      <div class="formula-card">
-        <span>Выживаемость</span>
-        <p><code>CI</code>, <code>IBS</code>, <code>AUPRC</code></p>
+    <div class="overview-table-block">
+      <h3>Метрики в исследовании</h3>
+      <div class="overview-table-wrap">
+        <table class="overview-data-table metrics-table">
+          <thead>
+            <tr>
+              <th>Блок задачи</th>
+              <th>Обозначение</th>
+              <th>Полное название</th>
+              <th>Формула / смысл</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Событие</td>
+              <td><code>AUC_EVENT</code></td>
+              <td>Площадь под ROC-кривой</td>
+              <td class="formula-cell">\(\mathrm{AUC}=\frac{1}{n_1n_0}\sum\limits_{i:Y_i=1}\sum\limits_{j:Y_j=0}\mathbb{I}(\widehat P_i>\widehat P_j)\)</td>
+            </tr>
+            <tr>
+              <td>Событие</td>
+              <td><code>LOGLOSS_EVENT</code></td>
+              <td>Логарифмическая функция потерь</td>
+              <td class="formula-cell">\(\mathrm{LogLoss}=-\frac{1}{n}\sum\limits_i\left[Y_i\ln \widehat P_i+(1-Y_i)\ln(1-\widehat P_i)\right]\)</td>
+            </tr>
+            <tr>
+              <td>Событие</td>
+              <td><code>RMSE_EVENT</code></td>
+              <td>Среднеквадратичная ошибка вероятности события</td>
+              <td class="formula-cell">\(\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum\limits_i(Y_i-\widehat P_i)^2}\)</td>
+            </tr>
+            <tr>
+              <td>Время</td>
+              <td><code>RMSE_TIME</code></td>
+              <td>Корень из среднеквадратичной ошибки времени</td>
+              <td class="formula-cell">\(\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum\limits_i(\widetilde T_i-\widehat T(X_i))^2}\)</td>
+            </tr>
+            <tr>
+              <td>Время</td>
+              <td><code>R2_TIME</code></td>
+              <td>Коэффициент детерминации</td>
+              <td class="formula-cell">\(R^2=1-\frac{\sum_i(\widetilde T_i-\widehat T_i)^2}{\sum_i(\widetilde T_i-\overline T)^2}\)</td>
+            </tr>
+            <tr>
+              <td>Время</td>
+              <td><code>MAPE_TIME</code></td>
+              <td>Средняя абсолютная процентная ошибка</td>
+              <td class="formula-cell">\(\mathrm{MAPE}=\frac{100}{n}\sum\limits_i\left|\frac{\widetilde T_i-\widehat T(X_i)}{\max(\widetilde T_i,1)}\right|\)</td>
+            </tr>
+            <tr>
+              <td>Время</td>
+              <td><code>MEDAPE_TIME</code></td>
+              <td>Медианная абсолютная процентная ошибка</td>
+              <td class="formula-cell">\(\mathrm{MEDAPE}=100\cdot\mathrm{median}\left|\frac{\widetilde T_i-\widehat T(X_i)}{\max(\widetilde T_i,1)}\right|\)</td>
+            </tr>
+            <tr>
+              <td>Время</td>
+              <td><code>SPEARMAN_TIME</code></td>
+              <td>Коэффициент ранговой корреляции Спирмена</td>
+              <td class="formula-cell">\(\rho_s=1-\frac{6\sum_i d_i^2}{n(n^2-1)}\)</td>
+            </tr>
+            <tr>
+              <td>Время</td>
+              <td><code>RMSLE_TIME</code></td>
+              <td>Логарифмическая среднеквадратичная ошибка</td>
+              <td class="formula-cell">\(\mathrm{RMSLE}=\sqrt{\frac{1}{n}\sum_i\left(\ln(1+\widetilde T_i)-\ln(1+\widehat T(X_i))\right)^2}\)</td>
+            </tr>
+            <tr>
+              <td>Выживаемость</td>
+              <td><code>CI</code></td>
+              <td>Индекс согласованности</td>
+              <td class="formula-cell">\(\mathrm{CI}=\frac{\text{число согласованных пар}}{\text{число сравнимых пар}}\)</td>
+            </tr>
+            <tr>
+              <td>Выживаемость</td>
+              <td><code>IBS</code></td>
+              <td>Интегрированная оценка Брайера</td>
+              <td class="formula-cell">\(\mathrm{IBS}=\frac{1}{t_{\max}}\int_0^{t_{\max}}BS(t)\,dt\)</td>
+            </tr>
+            <tr>
+              <td>Выживаемость</td>
+              <td><code>AUPRC</code></td>
+              <td>Площадь под survival precision-recall curve</td>
+              <td class="formula-cell">\(AUPRC_{\delta=1}=\int_0^1P(T_i/\phi&gt;T&gt;T_i\phi)\,d\phi\)</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <p class="overview-note">
-      Piecewise-модели будут добавлены позже как дополнительное расширение survival-семейства.
-    </p>
+    <div class="overview-table-block">
+      <h3>Наборы данных</h3>
+      <div class="overview-table-wrap">
+        <table class="overview-data-table dataset-table">
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>N наблюдений</th>
+              <th>N признаков</th>
+              <th>Целевые переменные</th>
+              <th>Процент цензурирования</th>
+              <th>Событие</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>ACTG</td><td>1151</td><td>11</td><td>time, event</td><td>91,66%</td><td>СПИД</td></tr>
+            <tr><td>GBSG</td><td>686</td><td>8</td><td>rfst, cens</td><td>56,41%</td><td>рецидив рака молочной железы</td></tr>
+            <tr><td>PBC</td><td>418</td><td>17</td><td>time, status</td><td>61,48%</td><td>смерть</td></tr>
+            <tr><td>Rott2</td><td>2982</td><td>11</td><td>time, event</td><td>57,34%</td><td>смерть</td></tr>
+            <tr><td>Smarto</td><td>3873</td><td>26</td><td>TEVENT, EVENT</td><td>88,12%</td><td>сердечно-сосудистое заболевание</td></tr>
+            <tr><td>Framingham</td><td>4699</td><td>7</td><td>followup, chdfate</td><td>68,35%</td><td>ишемическая болезнь сердца</td></tr>
+            <tr><td>Support2</td><td>9105</td><td>35</td><td>d.time, death</td><td>31,89%</td><td>смерть</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </article>
 
   <article class="overview-panel" data-panel="results" id="results">
     <span class="overview-kicker">Итоговое ранжирование</span>
     <h2>Результаты экспериментов</h2>
     <p>
-      Итоговые результаты показывают, что наиболее сильные позиции заняли модели анализа
-      выживаемости и ансамблевые методы. В сводной таблице первое место занимает
-      <strong>ParallelBootstrapCRAID</strong>, второе - <strong>CRAID</strong>, третье -
-      <strong>RandomForestRegressor</strong>.
+      Итоговые результаты показывают относительное положение методов после агрегации
+      рангов по датасетам и постановкам задачи. В таблице ниже отображается актуальный
+      leaderboard из предрассчитанного файла результатов.
     </p>
 
     {% if top_methods %}
@@ -195,14 +599,90 @@
 
   <article class="overview-panel" data-panel="usage" id="usage">
     <span class="overview-kicker">Работа с системой</span>
-    <h2>Как использовать</h2>
-    <ol class="usage-steps">
-      <li>Открой главную страницу и выбери датасет, пресет метрик и модели.</li>
-      <li>Построй Plotly-график для сравнения выбранных моделей по двум метрикам.</li>
-      <li>Открой AI-интерпретатор и выбери задачу: классификация события, прогноз времени или анализ выживаемости.</li>
-      <li>Используй RAG-ассистента, чтобы задать вопрос по диплому, коду, таблицам, метрикам или архитектуре.</li>
-      <li>Для локального запуска используй <code>SAWRAP_SKIP_MISSING_RECALC=1 python3 -m uvicorn SAWrap.UI.app:app --reload</code>.</li>
-    </ol>
+    <h2>Сценарии использования</h2>
+    <p>
+      В дипломе система описана через четыре основных сценария: быстрый визуальный
+      анализ, изучение итогового ранжирования, полный пакетный эксперимент и
+      самостоятельное использование адаптеров.
+    </p>
+
+    <div class="scenario-grid">
+      <section class="scenario-card">
+        <span class="scenario-number">01</span>
+        <h3>Интерактивное сравнение методов</h3>
+        <p>
+          Используется для быстрого сравнения нескольких моделей на выбранном датасете
+          и визуального анализа графика по двум метрикам.
+        </p>
+        <ol>
+          <li>Веб-сайт запускается локально или открывается в уже развернутой версии.</li>
+          <li>На главной странице выбираются датасет, модели и метрики.</li>
+          <li>После построения Plotly-графика сравнивается положение моделей по выбранным показателям.</li>
+        </ol>
+      </section>
+
+      <section class="scenario-card">
+        <span class="scenario-number">02</span>
+        <h3>Анализ итогового ранжирования</h3>
+        <p>
+          Используется для оценки устойчивости методов по всем датасетам и постановкам
+          задачи.
+        </p>
+        <ol>
+          <li>Во вкладке <code>Результаты</code> отображается общий leaderboard.</li>
+          <li>На странице <code>/leaderboard</code> доступны агрегированные ранги и визуальные сравнения.</li>
+          <li>При обновлении таблиц в <code>UI/tables</code> leaderboard пересчитывается отдельно.</li>
+        </ol>
+      </section>
+
+      <section class="scenario-card">
+        <span class="scenario-number">03</span>
+        <h3>Пакетный запуск эксперимента</h3>
+        <p>
+          Используется для воспроизводимого расчета: разбиение данных, подбор
+          гиперпараметров, оценка качества и формирование таблиц результатов.
+        </p>
+        <ol>
+          <li>Датасет задается параметром <code>--dataset</code>.</li>
+          <li>Расчет запускается командой ниже; для полной серии допускается увеличение <code>--processes</code> при наличии ресурсов.</li>
+          <li>После проверки результатов обновляются таблицы сайта и пересобирается leaderboard.</li>
+        </ol>
+        <pre><code>cd /Users/dimonzhi/Documents/proga/SAWrap
+python3 run_many_server.py --dataset support2 --processes 1</code></pre>
+      </section>
+
+      <section class="scenario-card">
+        <span class="scenario-number">04</span>
+        <h3>Использование адаптеров в Python</h3>
+        <p>
+          Используется, когда требуется взять собственную модель и получить единый survival-формат:
+          функцию выживания, вероятность события и ожидаемое время.
+        </p>
+        <ol>
+          <li>Подготавливается <code>X</code> с признаками и <code>y</code> с колонками <code>time</code>, <code>event</code>.</li>
+          <li>Классификатор оборачивается в <code>ClassifWrapSA</code>, регрессор - в <code>RegrWrapSA</code>, survival-модель - в <code>SAWrapSA</code>.</li>
+          <li>Для получения результатов используются <code>predict_survival_function</code>, <code>predict_proba</code> и <code>predict_expected_time</code>.</li>
+        </ol>
+        <pre><code>import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from survivors.external import ClassifWrapSA
+
+X = pd.read_csv("features.csv")
+y = pd.read_csv("target.csv")  # columns: time, event
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+model = ClassifWrapSA(RandomForestClassifier(random_state=42))
+model.fit(X_train, y_train, time_col="time", event_col="event")
+
+S, times = model.predict_survival_function(X_test)
+event_proba = model.predict_proba(X_test)[:, 1]
+expected_time = model.predict_expected_time(X_test)</code></pre>
+      </section>
+    </div>
   </article>
 </section>
 

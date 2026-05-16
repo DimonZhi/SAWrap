@@ -90,6 +90,42 @@
         {% endfor %}
       </div>
     </div>
+
+    <div class="piecewise-picker-card">
+      <div class="piecewise-picker-heading">
+        <h3>Piecewise-times</h3>
+        <span>times={{ piecewise_times }}</span>
+      </div>
+      <p class="hint">
+        Доступны два Piecewise-варианта. Для каждого выбирается базовый классификатор,
+        а метрики берутся из предрассчитанных Piecewise-таблиц.
+      </p>
+
+      {% set selected_piecewise = selected.piecewise_families if selected else [] %}
+      {% for option in piecewise_options %}
+        {% set selected_base = selected.get(option.base_field, piecewise_default_base) if selected else piecewise_default_base %}
+        <div class="piecewise-option">
+          <label class="checkbox-row piecewise-toggle">
+            <input
+              type="checkbox"
+              name="piecewise_families"
+              value="{{ option.family }}"
+              {% if option.family in selected_piecewise %}checked{% endif %}
+            >
+            <span>{{ option.label }}</span>
+          </label>
+          <p>{{ option.description }}</p>
+          <label class="field-label">Базовая модель</label>
+          <select name="{{ option.base_field }}" class="input-field piecewise-base-select">
+            {% for base in piecewise_base_models %}
+              <option value="{{ base.id }}" {% if selected_base == base.id %}selected{% endif %}>
+                {{ base.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endfor %}
+    </div>
   </section>
 
   <section class="card span-2">
@@ -229,7 +265,7 @@
   <div class="project-rag-shell" id="project-rag-shell" data-chat-url="{{ url_for('project_rag_chat') }}">
     <div class="project-rag-messages" id="project-rag-messages" aria-live="polite">
       <div class="ai-chat-message assistant">
-        Спроси про научную идею, метрики, архитектуру, результаты экспериментов или как объяснить проект жюри.
+        Спроси про научную идею, метрики, архитектуру, результаты экспериментов или как объяснить проект на защите.
       </div>
     </div>
 
@@ -378,6 +414,19 @@ function arrow(metricKey) {
     checkboxes.forEach((checkbox) => {
       checkbox.addEventListener('change', () => syncSelectAllButton(btn));
     });
+  });
+
+  const piecewiseOptions = Array.from(document.querySelectorAll('.piecewise-option'));
+  piecewiseOptions.forEach((option) => {
+    const checkbox = option.querySelector('input[name="piecewise_families"]');
+    const select = option.querySelector('.piecewise-base-select');
+    if (!checkbox || !select) return;
+
+    const syncPiecewiseSelect = () => {
+      select.disabled = !checkbox.checked;
+    };
+    checkbox.addEventListener('change', syncPiecewiseSelect);
+    syncPiecewiseSelect();
   });
 
   // ---------- plotly ----------

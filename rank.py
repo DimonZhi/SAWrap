@@ -52,7 +52,7 @@ PIECEWISE_MODEL_PREFIXES = {
 }
 
 PIECEWISE_ALLOWED_TIMES = {16}
-INCLUDE_PIECEWISE = False
+INCLUDE_PIECEWISE = True
 
 CLASSIFICATION_METRICS = [
     "AUC_EVENT_mean",
@@ -336,7 +336,11 @@ def main():
                         piecewise_status = "error"
                         piecewise_error = str(piecewise_exc)
 
-            final_df = base_df.copy()
+            final_df = (
+                pd.concat([base_df, piecewise_rows], ignore_index=True, sort=False)
+                if not piecewise_rows.empty
+                else base_df.copy()
+            )
             tbl, diag = rank_dataset_blocks(final_df, ds, allowed_methods=None)
             per_dataset[ds] = tbl
             diag["Status"] = "ok"

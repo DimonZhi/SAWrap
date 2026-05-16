@@ -15,6 +15,7 @@ from .helpers_ai_advice import AI_TASKS, build_ai_advice
 from .helpers_project_rag import build_project_rag_answer
 from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics
 from .helpers_leaderboard import load_leaderboard_images, load_overall_leaderboard_rows
+from .helpers_piecewise import load_piecewise_classification_summary
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -129,6 +130,68 @@ MODELS = [
 ]
 
 
+PIECEWISE_TIMES = 16
+PIECEWISE_BASE_MODELS = [
+    {"id": "DecisionTreeClassifier", "label": "DecisionTreeClassifier"},
+    {"id": "LogisticRegression", "label": "LogisticRegression"},
+    {"id": "RandomForestClassifier", "label": "RandomForestClassifier"},
+    {"id": "GradientBoostingClassifier", "label": "GradientBoostingClassifier"},
+]
+PIECEWISE_OPTIONS = [
+    {
+        "id": "piecewise_plain",
+        "family": "PiecewiseClassifWrapSA",
+        "label": "PiecewiseClassifWrapSA",
+        "base_field": "piecewise_plain_base",
+        "description": "Интервальные классификаторы без отдельной censor-aware коррекции.",
+    },
+    {
+        "id": "piecewise_censor",
+        "family": "PiecewiseCensorAwareClassifWrapSA",
+        "label": "PiecewiseCensorAwareClassifWrapSA",
+        "base_field": "piecewise_censor_base",
+        "description": "Интервальные классификаторы с учетом цензурированных наблюдений.",
+    },
+]
+PIECEWISE_DEFAULT_BASE = "DecisionTreeClassifier"
+
+
+def _valid_piecewise_base(model_name: str) -> str:
+    allowed = {model["id"] for model in PIECEWISE_BASE_MODELS}
+    return model_name if model_name in allowed else PIECEWISE_DEFAULT_BASE
+
+
+def build_piecewise_model_cfgs(
+    piecewise_families: Optional[List[str]],
+    piecewise_plain_base: str,
+    piecewise_censor_base: str,
+) -> list[dict]:
+    selected_families = set(piecewise_families or [])
+    base_by_family = {
+        "PiecewiseClassifWrapSA": _valid_piecewise_base(piecewise_plain_base),
+        "PiecewiseCensorAwareClassifWrapSA": _valid_piecewise_base(piecewise_censor_base),
+    }
+
+    cfgs = []
+    for option in PIECEWISE_OPTIONS:
+        family = option["family"]
+        if family not in selected_families:
+            continue
+        base_model = base_by_family[family]
+        label = f"{family}({base_model}, times={PIECEWISE_TIMES})"
+        cfgs.append(
+            {
+                "id": f"piecewise::{family}::{base_model}::{PIECEWISE_TIMES}",
+                "label": label,
+                "lib": "survivors",
+                "task": "classification",
+                "param_grid": {},
+                "precomputed_only": True,
+            }
+        )
+    return cfgs
+
+
 
 import importlib
 
@@ -156,6 +219,10 @@ def home_context(request: Request, **overrides):
         "datasets": DATASETS,
         "presets": PRESETS,
         "models": MODELS,
+        "piecewise_options": PIECEWISE_OPTIONS,
+        "piecewise_base_models": PIECEWISE_BASE_MODELS,
+        "piecewise_times": PIECEWISE_TIMES,
+        "piecewise_default_base": PIECEWISE_DEFAULT_BASE,
         "selected": None,
         "plot_data": None,
         "plot_json": None,
@@ -244,10 +311,16 @@ async def compare_models(
     dataset_id: str = Form(...),
     preset_id: str = Form(...),
     model_ids: Optional[List[str]] = Form(None),
+    piecewise_families: Optional[List[str]] = Form(None),
+    piecewise_plain_base: str = Form(PIECEWISE_DEFAULT_BASE),
+    piecewise_censor_base: str = Form(PIECEWISE_DEFAULT_BASE),
     x_metric: Optional[str] = Form(None),
     y_metric: Optional[str] = Form(None),
 ):
     model_ids = model_ids or []
+    piecewise_families = piecewise_families or []
+    piecewise_plain_base = _valid_piecewise_base(piecewise_plain_base)
+    piecewise_censor_base = _valid_piecewise_base(piecewise_censor_base)
     preset = next((p for p in PRESETS if p["id"] == preset_id), None)
     xk = x_metric or (preset["x_metric"] if preset else None)
     yk = y_metric or (preset["y_metric"] if preset else None)
@@ -255,6 +328,9 @@ async def compare_models(
         "dataset_id": dataset_id,
         "preset_id": preset_id,
         "model_ids": model_ids,
+        "piecewise_families": piecewise_families,
+        "piecewise_plain_base": piecewise_plain_base,
+        "piecewise_censor_base": piecewise_censor_base,
         "x_metric": xk,
         "y_metric": yk,
     }
@@ -267,7 +343,14 @@ async def compare_models(
             messages=[{"category":"error","text":"Пресет не найден"}],
         ))
 
-    if not model_ids:
+    piecewise_cfgs = build_piecewise_model_cfgs(
+        piecewise_families,
+        piecewise_plain_base,
+        piecewise_censor_base,
+    )
+    selected_cfgs = [m for m in MODELS if m["id"] in model_ids] + piecewise_cfgs
+
+    if not selected_cfgs:
         return templates.TemplateResponse(request, "home.html", home_context(
             request,
             selected=selected,
@@ -275,10 +358,12 @@ async def compare_models(
         ))
 
     allow_recompute = not DISABLE_MISSING_RECALC
-    selected_cfgs = [m for m in MODELS if m["id"] in model_ids]
+    can_recompute_selected = allow_recompute and any(
+        not mcfg.get("precomputed_only") for mcfg in selected_cfgs
+    )
     X = y = None
 
-    if allow_recompute:
+    if can_recompute_selected:
         load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
         if load_fn is None:
             return templates.TemplateResponse(request, "home.html", home_context(
@@ -303,14 +388,15 @@ async def compare_models(
             model_label=mcfg["label"],
             x_metric=xk,
             y_metric=yk,
-            allow_recompute=allow_recompute,
+            allow_recompute=can_recompute_selected and not mcfg.get("precomputed_only"),
         )
 
-        metrics_list, df = list_surv_metrics_from_table(BASE_DIR, dataset_id)
+        row_metrics_list, df = list_surv_metrics_from_table(BASE_DIR, dataset_id, model_label=mcfg["label"])
+        metrics_list = sorted(set(metrics_list).union(row_metrics_list))
         r = df[df["method"].astype(str) == str(mcfg["label"])]
         if r.empty:
-            msg = f"{mcfg['label']}: нет строки в таблице {dataset_id}.xlsx"
-            if not allow_recompute:
+            msg = f"{mcfg['label']}: нет строки в таблицах для {dataset_id}"
+            if not allow_recompute or mcfg.get("precomputed_only"):
                 msg += " и автопересчёт отключён"
             errors.append(msg)
             continue
@@ -322,7 +408,7 @@ async def compare_models(
             missing_metrics.append(yk)
         if missing_metrics:
             msg = f"{mcfg['label']}: отсутствуют метрики {', '.join(missing_metrics)}"
-            if not allow_recompute:
+            if not allow_recompute or mcfg.get("precomputed_only"):
                 msg += " и автопересчёт отключён"
             errors.append(msg)
             continue
@@ -372,6 +458,7 @@ async def goal_page(request: Request):
 async def overview_page(request: Request):
     leaderboard_rows = load_overall_leaderboard_rows(BASE_DIR / "tables" / "leaderboards_by_task.xlsx")
     notebook_figures = load_leaderboard_images(BASE_DIR / "images", limit=3)
+    piecewise_summary = load_piecewise_classification_summary(BASE_DIR / "tables")
     return templates.TemplateResponse(
         request,
         "overview.html",
@@ -381,6 +468,7 @@ async def overview_page(request: Request):
             "leaderboard_rows": leaderboard_rows,
             "top_methods": leaderboard_rows[:3],
             "notebook_figures": notebook_figures,
+            "piecewise_summary": piecewise_summary,
         },
     )
 
