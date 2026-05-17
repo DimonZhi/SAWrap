@@ -82,6 +82,17 @@ S_hat(t_k | X) = prod_{j=1}^{k} (1 - p_j(X))
 
 По classification score, где `AUC_EVENT` имеет вес 45%, `LOGLOSS_EVENT` - 35%, `RMSE_EVENT` - 20%, самый сильный эффект при глобальном автовыборе получен для `DecisionTreeClassifier`: `PiecewiseClassifWrapSA(DecisionTreeClassifier, times=8)` улучшил все 7 датасетов со средним приростом +24.8 пункта, а `PiecewiseCensorAwareClassifWrapSA(DecisionTreeClassifier, times=16)` улучшил 6 из 7 датасетов и дал лучший кейс GBSG, +53.7 пункта.
 
+Новые результаты после пересчета leaderboard с глобальным `times`:
+
+| Piecewise-модель | Глобальный times | Датасетов | Средний прирост classification score | Win-rate |
+| --- | ---: | ---: | ---: | ---: |
+| `PiecewiseClassifWrapSA(DecisionTreeClassifier)` | 8 | 7 | +24.8 | 100% |
+| `PiecewiseCensorAwareClassifWrapSA(DecisionTreeClassifier)` | 16 | 7 | +23.4 | 86% |
+| `PiecewiseClassifWrapSA(KNeighborsClassifier)` | 8 | 7 | +4.6 | 71% |
+| `PiecewiseCensorAwareClassifWrapSA(KNeighborsClassifier)` | 8 | 7 | +2.9 | 57% |
+
+В общем leaderboard лучший Piecewise-вариант - `PiecewiseCensorAwareClassifWrapSA(LogisticRegression, times=16)`, место 3 из всех методов, покрытие 7 датасетов. Это показывает, что Piecewise полезен не только как локальное улучшение DecisionTreeClassifier, но и как конкурентная инженерная ветка в агрегированном сравнении.
+
 ## Метрики в исследовании
 
 Классификационный блок:
@@ -89,6 +100,8 @@ S_hat(t_k | X) = prod_{j=1}^{k} (1 - p_j(X))
 - `AUC_EVENT`: выше лучше;
 - `LOGLOSS_EVENT`: ниже лучше;
 - `RMSE_EVENT`: ниже лучше.
+
+Важно: в classification-блоке проекта не используются отдельные метрики `Accuracy`, `F1`, `Precision` и `Recall`. Веса classification-блока в AI-интерпретаторе: `AUC_EVENT` 45%, `LOGLOSS_EVENT` 35%, `RMSE_EVENT` 20%.
 
 Регрессионный блок:
 
@@ -99,11 +112,15 @@ S_hat(t_k | X) = prod_{j=1}^{k} (1 - p_j(X))
 - `SPEARMAN_TIME`: выше лучше;
 - `RMSLE_TIME`: ниже лучше.
 
+Важно: в regression-блоке проекта не используются отдельные метрики `MAE`, `MSE`, `MSLE` и `Explained variance`. Веса regression-блока в AI-интерпретаторе: `RMSE_TIME` 30%, `R2_TIME` 25%, `MAPE_TIME` 15%, `MEDAPE_TIME` 15%, `SPEARMAN_TIME` 10%, `RMSLE_TIME` 5%.
+
 Survival-блок:
 
 - `CI`: выше лучше;
 - `IBS`: ниже лучше;
 - `AUPRC`: выше лучше.
+
+Важно: в survival-блоке проекта не используется отдельная метрика `Logarithmic score`. Также `Brier score` не используется как самостоятельная итоговая метрика; в проекте используется `IBS` - интегрированная оценка Брайера. Веса survival-блока в AI-интерпретаторе: `CI` 45%, `IBS` 35%, `AUPRC` 20%.
 
 Таблица "Метрики в исследовании" включает все 12 метрик из диплома:
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,9 @@ except ImportError:
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini"
+PIECEWISE_RE = re.compile(
+    r"^(Piecewise(?:CensorAware)?ClassifWrapSA)\(([^,]+),\s*times=(\d+)\)$"
+)
 
 AI_TASKS = [
     {"id": "classification", "label": "Классификация события"},
@@ -79,6 +83,79 @@ def _find_table_path(base_dir: Path, dataset_id: str) -> Path:
         if path.exists():
             return path
     return candidates[0]
+
+
+def _piecewise_match(method_name: Any):
+    return PIECEWISE_RE.match(str(method_name).strip())
+
+
+def _piecewise_rows_for_advice(
+    base_dir: Path,
+    dataset_id: str,
+    task_id: str,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    if task_id != "classification":
+        return pd.DataFrame(), []
+
+    try:
+        from .helpers_tables import get_piecewise_table_path, select_global_piecewise_time
+    except Exception:
+        return pd.DataFrame(), []
+
+    table_path = get_piecewise_table_path(base_dir, dataset_id)
+    if not table_path.exists():
+        return pd.DataFrame(), []
+
+    try:
+        piecewise_df = pd.read_excel(table_path)
+    except Exception:
+        return pd.DataFrame(), []
+
+    piecewise_df = piecewise_df.rename(columns={column: _norm(column) for column in piecewise_df.columns})
+    if "method" not in piecewise_df.columns or piecewise_df.empty:
+        return pd.DataFrame(), []
+
+    piecewise_df["method"] = piecewise_df["method"].astype(str).str.strip()
+    selected_cache: dict[tuple[str, str], int | None] = {}
+    keep_indices = []
+    variants: list[dict[str, Any]] = []
+
+    for index, method_name in piecewise_df["method"].items():
+        match = _piecewise_match(method_name)
+        if not match:
+            continue
+
+        family, base_model, times_raw = match.groups()
+        times = int(times_raw)
+        cache_key = (family, base_model)
+        if cache_key not in selected_cache:
+            selected_cache[cache_key] = select_global_piecewise_time(
+                base_dir,
+                family,
+                base_model,
+                "classification",
+            )
+
+        selected_times = selected_cache[cache_key]
+        if selected_times is None or times != selected_times:
+            continue
+
+        keep_indices.append(index)
+        variants.append(
+            {
+                "method": method_name,
+                "family": family,
+                "base_model": base_model,
+                "times": times,
+                "selection": "global",
+                "table_path": str(table_path),
+            }
+        )
+
+    if not keep_indices:
+        return pd.DataFrame(), []
+
+    return piecewise_df.loc[keep_indices].copy(), variants
 
 
 def _format_number(value: Any) -> str:
@@ -195,11 +272,19 @@ def _build_reason(best_row: pd.Series, top_metrics: list[dict[str, Any]], task_i
     )
     score = round(float(best_row["ai_score"]) * 100)
 
-    return [
+    reasons = [
         f"Модель лучше всего подходит, чтобы {config['goal']}: итоговая оценка по доступным метрикам {score}/100.",
         f"Главные аргументы: {strong_text}.",
         "Рекомендация основана на предрассчитанных таблицах и сравнении моделей внутри выбранного датасета.",
     ]
+    match = _piecewise_match(str(best_row.get("method", "")))
+    if match:
+        family, base_model, times = match.groups()
+        reasons.append(
+            f"Это Piecewise-вариант: {family} строит интервальные классификаторы поверх {base_model}, "
+            f"а times={times} выбран глобально для этой пары по всем датасетам."
+        )
+    return reasons
 
 
 def _compact_metric(metric: dict[str, Any]) -> str:
@@ -212,6 +297,19 @@ def _compact_metric(metric: dict[str, Any]) -> str:
         f"{metric['label']}: {metric['value']} "
         f"({metric['direction_label']}, позиция {position})"
     )
+
+
+def _piecewise_fact_lines(advice: dict[str, Any], limit: int = 10) -> list[str]:
+    variants = advice.get("piecewise_variants") or []
+    if not variants:
+        return []
+    lines = []
+    for variant in variants[:limit]:
+        lines.append(
+            f"- {variant['method']}: глобально выбран times={variant['times']} "
+            f"для {variant['family']} + {variant['base_model']}."
+        )
+    return lines
 
 
 def _build_openrouter_messages(advice: dict[str, Any]) -> list[dict[str, str]]:
@@ -228,9 +326,12 @@ def _build_openrouter_messages(advice: dict[str, Any]) -> list[dict[str, str]]:
             f"Задача: {advice.get('task_label')}",
             f"Рекомендованная модель: {advice.get('recommended_method')}",
             f"Итоговая оценка: {advice.get('score')}/100",
+            f"Piecewise-варианты учтены: {'да' if advice.get('piecewise_included') else 'нет'}",
+            "Piecewise-контекст:",
+            *(_piecewise_fact_lines(advice) or ["- нет"]),
             "Топ моделей:",
             *top_lines,
-            "Напиши интерпретацию на русском языке: какая модель подходит, почему, для какой задачи, и какие есть ограничения.",
+            "Напиши интерпретацию на русском языке: какая модель подходит, почему, для какой задачи, и как читать результат.",
         ]
     )
 
@@ -268,6 +369,9 @@ def _advice_facts(advice: dict[str, Any]) -> str:
             f"Итоговая оценка: {advice.get('score')}/100",
             f"Доступные метрики: {available}",
             f"Отсутствующие метрики: {missing}",
+            f"Piecewise-варианты учтены: {'да' if advice.get('piecewise_included') else 'нет'}",
+            "Piecewise-контекст:",
+            *(_piecewise_fact_lines(advice) or ["- нет"]),
             "Локальное объяснение:",
             reasons,
             "Топ моделей:",
@@ -470,6 +574,11 @@ def build_ai_advice(base_dir: Path, dataset_id: str, task_id: str, use_llm: bool
 
     df["method"] = df["method"].astype(str).str.strip()
     df = df[df["method"].ne("")].copy()
+    piecewise_rows, piecewise_variants = _piecewise_rows_for_advice(base_dir, dataset_id, task_id)
+    if not piecewise_rows.empty:
+        df = pd.concat([df, piecewise_rows], ignore_index=True, sort=False)
+        df = df.drop_duplicates(subset=["method"], keep="last").copy()
+
     active_metrics, missing_metrics = _active_metrics(df, task_id)
     if not active_metrics:
         return {
@@ -509,6 +618,8 @@ def build_ai_advice(base_dir: Path, dataset_id: str, task_id: str, use_llm: bool
         "available_metrics": [metric["key"] for metric in active_metrics],
         "missing_metrics": missing_metrics,
         "table_path": str(table_path),
+        "piecewise_included": bool(piecewise_variants),
+        "piecewise_variants": piecewise_variants,
         "llm": {
             "enabled": False,
             "provider": "OpenRouter",

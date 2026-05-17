@@ -42,6 +42,40 @@ def test_build_ai_advice_recommends_best_classification_model(tmp_path: Path):
     assert advice["llm"]["enabled"] is False
 
 
+def test_build_ai_advice_includes_global_piecewise_variants(tmp_path: Path):
+    _write_dataset_table(
+        tmp_path,
+        "actg",
+        pd.DataFrame(
+            {
+                "method": ["ClassifWrapSA(DecisionTreeClassifier)", "StrongBase"],
+                "auc_event_mean": [0.62, 0.82],
+                "logloss_event_mean": [0.55, 0.30],
+                "rmse_event_mean": [0.42, 0.28],
+            }
+        ),
+    )
+    pd.DataFrame(
+        {
+            "METHOD": [
+                "PiecewiseClassifWrapSA(DecisionTreeClassifier, times=8)",
+                "PiecewiseClassifWrapSA(DecisionTreeClassifier, times=16)",
+            ],
+            "AUC_EVENT_mean": [0.95, 0.70],
+            "LOGLOSS_EVENT_mean": [0.18, 0.50],
+            "RMSE_EVENT_mean": [0.12, 0.40],
+        }
+    ).to_excel(tmp_path / "tables" / "Piecewise_actg.xlsx", index=False)
+
+    advice = build_ai_advice(tmp_path, "actg", "classification")
+
+    assert advice["has_result"] is True
+    assert advice["piecewise_included"] is True
+    assert advice["recommended_method"] == "PiecewiseClassifWrapSA(DecisionTreeClassifier, times=8)"
+    assert advice["piecewise_variants"][0]["times"] == 8
+    assert any("times=8" in reason for reason in advice["why"])
+
+
 def test_build_ai_advice_respects_lower_is_better_for_survival(tmp_path: Path):
     _write_dataset_table(
         tmp_path,

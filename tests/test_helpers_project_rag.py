@@ -216,3 +216,24 @@ def test_rag_prompt_forbids_limitations_section(tmp_path: Path):
     assert "В контексте есть результаты экспериментов" in message_text
     assert "Не добавляй отдельный блок ограничений" in message_text
     assert "Не выводи разделы с названиями 'Ограничения'" in message_text
+
+
+def test_rag_prompt_pins_project_metric_weights(tmp_path: Path):
+    _write_knowledge(tmp_path)
+
+    chunks = retrieve_project_context(tmp_path, "Какие веса у classification, regression и survival метрик?")
+    message_text = "\n".join(
+        message["content"]
+        for message in _build_rag_messages("Какие веса у classification, regression и survival метрик?", chunks)
+    )
+
+    assert "classification - AUC_EVENT 45%, LOGLOSS_EVENT 35%, RMSE_EVENT 20%" in message_text
+    assert (
+        "regression - RMSE_TIME 30%, R2_TIME 25%, MAPE_TIME 15%, "
+        "MEDAPE_TIME 15%, SPEARMAN_TIME 10%, RMSLE_TIME 5%"
+    ) in message_text
+    assert "survival - CI 45%, IBS 35%, AUPRC 20%" in message_text
+    assert "Accuracy, F1, Precision и Recall не являются classification-метриками проекта" in message_text
+    assert "MAE, MSE, MSLE и Explained variance не являются regression-метриками проекта" in message_text
+    assert "Logarithmic score не является survival-метрикой проекта" in message_text
+    assert "не меняй веса метрик на неуказанные в проекте" in message_text

@@ -748,7 +748,23 @@ def _context_audit(chunks: list[KnowledgeChunk]) -> str:
     titles = {chunk.title.lower() for chunk in chunks}
     sources = {chunk.source for chunk in chunks}
 
-    facts = []
+    facts = [
+        "Канонический список метрик проекта: событие - AUC_EVENT, LOGLOSS_EVENT, RMSE_EVENT; "
+        "время - RMSE_TIME, R2_TIME, MAPE_TIME, MEDAPE_TIME, SPEARMAN_TIME, RMSLE_TIME; "
+        "выживаемость - CI, IBS, AUPRC.",
+        "Веса AI-интерпретатора: classification - AUC_EVENT 45%, LOGLOSS_EVENT 35%, "
+        "RMSE_EVENT 20%; regression - RMSE_TIME 30%, R2_TIME 25%, MAPE_TIME 15%, "
+        "MEDAPE_TIME 15%, SPEARMAN_TIME 10%, RMSLE_TIME 5%; survival - CI 45%, "
+        "IBS 35%, AUPRC 20%.",
+        "Accuracy, F1, Precision и Recall не являются classification-метриками проекта; "
+        "в classification-блоке используются только AUC_EVENT, LOGLOSS_EVENT и RMSE_EVENT.",
+        "MAE, MSE, MSLE и Explained variance не являются regression-метриками проекта; "
+        "в regression-блоке используются только RMSE_TIME, R2_TIME, MAPE_TIME, MEDAPE_TIME, "
+        "SPEARMAN_TIME и RMSLE_TIME.",
+        "Logarithmic score не является survival-метрикой проекта. Brier score как отдельная "
+        "метрика в итоговом survival-блоке не используется; используется IBS - интегрированная "
+        "оценка Брайера.",
+    ]
     if any("модели" in title for title in titles):
         facts.append(
             "В контексте есть конкретные модели: LogisticRegression, SVC, KNeighborsClassifier, "
@@ -813,6 +829,11 @@ def _build_rag_messages(
                 "Перед ответом проверь найденный контекст на разделы с метриками, формулами "
                 "и thesis/contents/2_problem_def.tex. Не утверждай, что метрики или формулы не указаны, "
                 "если в источниках есть хотя бы их перечень или определения. "
+                "Для вопросов о метриках и весах используй только канонический список из контроля "
+                "контекста: не добавляй Accuracy/F1/Precision/Recall в classification-блок, "
+                "не добавляй MAE/MSE/MSLE/Explained variance в regression-блок, "
+                "не добавляй Logarithmic score, не заменяй IBS на отдельный Brier score "
+                "и не меняй веса метрик на неуказанные в проекте. "
                 "Не выводи разделы с названиями 'Ограничения', 'Ограничения/источники', 'Недостатки' "
                 "или похожие блоки, если пользователь сам прямо не попросил ограничения. "
                 "Формулы пиши в LaTeX с delimiters \\( ... \\) или \\[ ... \\], например "
