@@ -91,41 +91,40 @@
       </div>
     </div>
 
-    <div class="piecewise-picker-card">
-      <div class="piecewise-picker-heading">
-        <h3>Piecewise-times</h3>
-        <span>times={{ piecewise_times }}</span>
-      </div>
-      <p class="hint">
-        Доступны два Piecewise-варианта. Для каждого выбирается базовый классификатор,
-        а метрики берутся из предрассчитанных Piecewise-таблиц.
-      </p>
-
-      {% set selected_piecewise = selected.piecewise_families if selected else [] %}
-      {% for option in piecewise_options %}
-        {% set selected_base = selected.get(option.base_field, piecewise_default_base) if selected else piecewise_default_base %}
-        <div class="piecewise-option">
-          <label class="checkbox-row piecewise-toggle">
-            <input
-              type="checkbox"
-              name="piecewise_families"
-              value="{{ option.family }}"
-              {% if option.family in selected_piecewise %}checked{% endif %}
-            >
+    {% for option in piecewise_options %}
+      {% set selected_bases = selected.get(option.bases_field, []) if selected else [] %}
+      <div class="models-dropdown piecewise-dropdown">
+        <div class="models-dd-btn piecewise-dd-trigger" role="button" tabindex="0">
+          <span class="models-dd-label">
             <span>{{ option.label }}</span>
-          </label>
-          <p>{{ option.description }}</p>
-          <label class="field-label">Базовая модель</label>
-          <select name="{{ option.base_field }}" class="input-field piecewise-base-select">
-            {% for base in piecewise_base_models %}
-              <option value="{{ base.id }}" {% if selected_base == base.id %}selected{% endif %}>
-                {{ base.label }}
-              </option>
-            {% endfor %}
-          </select>
+            <span class="tooltip-wrap">
+              <span
+                class="tooltip-help piecewise-help"
+                tabindex="0"
+                aria-label="{{ option.description }}"
+              >?</span>
+              <span class="tooltip-inline-note" hidden>
+                <strong>{{ option.label }}</strong>
+                <span>{{ option.description }}</span>
+              </span>
+            </span>
+          </span>
+          <span class="caret">▾</span>
         </div>
-      {% endfor %}
-    </div>
+        <div class="models-dd-menu">
+          <div class="models-dd-actions">
+            <button type="button" class="models-select-all">Выбрать все</button>
+          </div>
+          {% for base in piecewise_base_models %}
+            <label class="checkbox-row">
+              <input type="checkbox" name="{{ option.bases_field }}" value="{{ base.id }}"
+                {% if base.id in selected_bases %}checked{% endif %}>
+              <span>{{ base.label }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
   </section>
 
   <section class="card span-2">
@@ -382,7 +381,7 @@ function arrow(metricKey) {
   function syncSelectAllButton(btn) {
     const menu = btn.closest('.models-dd-menu');
     if (!menu) return;
-    const checkboxes = Array.from(menu.querySelectorAll('input[name="model_ids"]'));
+    const checkboxes = Array.from(menu.querySelectorAll('input[type="checkbox"]'));
     if (!checkboxes.length) return;
     const allChecked = checkboxes.every((checkbox) => checkbox.checked);
     btn.textContent = allChecked ? 'Снять все' : 'Выбрать все';
@@ -398,35 +397,42 @@ function arrow(metricKey) {
       e.stopPropagation();
       const menu = btn.closest('.models-dd-menu');
       if (!menu) return;
-      const checkboxes = Array.from(menu.querySelectorAll('input[name="model_ids"]'));
+      const checkboxes = Array.from(menu.querySelectorAll('input[type="checkbox"]'));
       if (!checkboxes.length) return;
 
       const shouldSelect = btn.dataset.mode !== 'clear';
       checkboxes.forEach((checkbox) => {
         checkbox.checked = shouldSelect;
+        checkbox.dispatchEvent(new Event('change', {bubbles: true}));
       });
       syncSelectAllButton(btn);
     });
 
     const menu = btn.closest('.models-dd-menu');
     if (!menu) return;
-    const checkboxes = Array.from(menu.querySelectorAll('input[name="model_ids"]'));
+    const checkboxes = Array.from(menu.querySelectorAll('input[type="checkbox"]'));
     checkboxes.forEach((checkbox) => {
       checkbox.addEventListener('change', () => syncSelectAllButton(btn));
     });
   });
 
-  const piecewiseOptions = Array.from(document.querySelectorAll('.piecewise-option'));
-  piecewiseOptions.forEach((option) => {
-    const checkbox = option.querySelector('input[name="piecewise_families"]');
-    const select = option.querySelector('.piecewise-base-select');
-    if (!checkbox || !select) return;
+  const tooltipWraps = Array.from(document.querySelectorAll('.tooltip-wrap'));
+  tooltipWraps.forEach((wrap) => {
+    const note = wrap.querySelector('.tooltip-inline-note');
+    if (!note) return;
 
-    const syncPiecewiseSelect = () => {
-      select.disabled = !checkbox.checked;
+    const showNote = (event) => {
+      event.stopPropagation();
+      note.hidden = false;
     };
-    checkbox.addEventListener('change', syncPiecewiseSelect);
-    syncPiecewiseSelect();
+    const hideNote = () => {
+      note.hidden = true;
+    };
+
+    wrap.addEventListener('mouseenter', showNote);
+    wrap.addEventListener('mouseleave', hideNote);
+    wrap.addEventListener('focusin', showNote);
+    wrap.addEventListener('focusout', hideNote);
   });
 
   // ---------- plotly ----------

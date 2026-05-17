@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from .helpers_ai_advice import TASK_CONFIGS, _score_models
+from .helpers_tables import select_global_piecewise_time
 
 
 PIECEWISE_FILES = {
@@ -23,7 +24,6 @@ PIECEWISE_RE = re.compile(
     r"^(Piecewise(?:CensorAware)?ClassifWrapSA)\(([^,]+),\s*times=(\d+)\)$"
 )
 BASE_CLASSIFIER_RE = re.compile(r"^ClassifWrapSA\((.+)\)$")
-PIECEWISE_TIMES = 16
 
 
 def _fmt(value: float | int | None, digits: int = 1) -> str:
@@ -61,6 +61,8 @@ def _read_piecewise_table(path: Path) -> pd.DataFrame | None:
 def _best_piecewise_rows(tables_dir: Path) -> list[dict[str, Any]]:
     metrics = TASK_CONFIGS["classification"]["metrics"]
     rows: list[dict[str, Any]] = []
+    piecewise_base_dir = tables_dir.parent if tables_dir.name == "tables" else tables_dir
+    selected_times_cache: dict[tuple[str, str], int | None] = {}
 
     for dataset_label, filename in PIECEWISE_FILES.items():
         frame = _read_piecewise_table(tables_dir / filename)
@@ -79,50 +81,47 @@ def _best_piecewise_rows(tables_dir: Path) -> list[dict[str, Any]]:
                 continue
             base_row = base_rows.iloc[0]
 
-            candidates = []
             for _, candidate in scored.iterrows():
                 candidate_name = str(candidate["method"])
                 piece_match = PIECEWISE_RE.match(candidate_name)
                 if not piece_match or piece_match.group(2) != model_name:
                     continue
                 times = int(piece_match.group(3))
-                if times != PIECEWISE_TIMES:
+                cache_key = (piece_match.group(1), model_name)
+                if cache_key not in selected_times_cache:
+                    selected_times_cache[cache_key] = select_global_piecewise_time(
+                        piecewise_base_dir,
+                        piece_match.group(1),
+                        model_name,
+                        "classification",
+                    )
+                selected_times = selected_times_cache[cache_key]
+                if selected_times is None or times != selected_times:
                     continue
-                candidates.append(
+                base_score = float(base_row["ai_score"]) * 100.0
+                piece_score = float(candidate["ai_score"]) * 100.0
+                rows.append(
                     {
-                        "score": float(candidate["ai_score"]) * 100.0,
+                        "score": piece_score,
                         "times": times,
                         "family": piece_match.group(1),
                         "method": candidate_name,
                         "row": candidate,
+                        "dataset": dataset_label,
+                        "model": model_name,
+                        "base_score": base_score,
+                        "piecewise_score": piece_score,
+                        "delta_score": piece_score - base_score,
+                        "variant": candidate_name,
+                        "variant_label": _variant_label(candidate_name),
+                        "base_auc": float(base_row.get("auc_event_mean", 0.0)),
+                        "piece_auc": float(candidate.get("auc_event_mean", 0.0)),
+                        "base_logloss": float(base_row.get("logloss_event_mean", 0.0)),
+                        "piece_logloss": float(candidate.get("logloss_event_mean", 0.0)),
+                        "base_rmse": float(base_row.get("rmse_event_mean", 0.0)),
+                        "piece_rmse": float(candidate.get("rmse_event_mean", 0.0)),
                     }
                 )
-
-            if not candidates:
-                continue
-
-            best = max(candidates, key=lambda item: (item["score"], -item["times"]))
-            base_score = float(base_row["ai_score"]) * 100.0
-            best_row = best["row"]
-            rows.append(
-                {
-                    "dataset": dataset_label,
-                    "model": model_name,
-                    "base_score": base_score,
-                    "piecewise_score": best["score"],
-                    "delta_score": best["score"] - base_score,
-                    "times": best["times"],
-                    "family": best["family"],
-                    "variant": best["method"],
-                    "variant_label": _variant_label(best["method"]),
-                    "base_auc": float(base_row.get("auc_event_mean", 0.0)),
-                    "piece_auc": float(best_row.get("auc_event_mean", 0.0)),
-                    "base_logloss": float(base_row.get("logloss_event_mean", 0.0)),
-                    "piece_logloss": float(best_row.get("logloss_event_mean", 0.0)),
-                    "base_rmse": float(base_row.get("rmse_event_mean", 0.0)),
-                    "piece_rmse": float(best_row.get("rmse_event_mean", 0.0)),
-                }
-            )
 
     return rows
 
@@ -143,11 +142,13 @@ def load_piecewise_classification_summary(tables_dir: Path) -> dict[str, Any]:
     decision_rows = frame[frame["model"] == "DecisionTreeClassifier"].copy()
 
     model_rows = []
-    for model, group in frame.groupby("model"):
+    for (family, model), group in frame.groupby(["family", "model"]):
         best_times = ", ".join(str(int(value)) for value in sorted(group["times"].unique()))
         model_rows.append(
             {
                 "model": model,
+                "family": family,
+                "piecewise_model": f"{family}({model})",
                 "datasets": int(group["dataset"].nunique()),
                 "base_score": _fmt(group["base_score"].mean()),
                 "piecewise_score": _fmt(group["piecewise_score"].mean()),
@@ -190,7 +191,7 @@ def load_piecewise_classification_summary(tables_dir: Path) -> dict[str, Any]:
             {
                 "label": "DecisionTreeClassifier",
                 "value": f"+{_fmt(dt_avg_delta)}",
-                "caption": f"средний прирост classification score при times={PIECEWISE_TIMES}",
+                "caption": "средний прирост classification score при глобальном выборе times",
             },
             {
                 "label": "Стабильность",
@@ -200,7 +201,7 @@ def load_piecewise_classification_summary(tables_dir: Path) -> dict[str, Any]:
             {
                 "label": "Лучший кейс",
                 "value": f"+{_fmt(float(best_case['delta_score']))}",
-                "caption": f"{best_case['dataset']}, {best_case['model']}, times={PIECEWISE_TIMES}",
+                "caption": f"{best_case['dataset']}, {best_case['model']}, times={int(best_case['times'])}",
             },
             {
                 "label": "Все классификаторы",
@@ -210,6 +211,6 @@ def load_piecewise_classification_summary(tables_dir: Path) -> dict[str, Any]:
         ],
         "model_rows": model_rows,
         "detail_rows": detail_rows,
-        "times_tested": str(PIECEWISE_TIMES),
+        "times_tested": "глобальный автовыбор одного times на Piecewise-модель",
         "score_note": "Score = AUC_EVENT 45%, LOGLOSS_EVENT 35%, RMSE_EVENT 20%.",
     }

@@ -656,8 +656,9 @@ body {
     cursor: pointer;
 
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 8px;
+    text-align: left;
 }
 
 .models-dd-btn:hover {
@@ -708,6 +709,14 @@ body {
     display: block;
 }
 
+.models-dd-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 .checkbox-row {
     display: flex;
     align-items: center;
@@ -720,62 +729,65 @@ body {
     margin-bottom: 0;
 }
 
-.piecewise-picker-card {
-    margin-top: 12px;
-    padding: 12px;
-    border: 1px solid #dbeafe;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+.caret {
+    margin-left: auto;
+    font-size: 11px;
+    opacity: 0.7;
 }
 
-.piecewise-picker-heading {
-    display: flex;
+.tooltip-wrap {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-width: 0;
 }
 
-.piecewise-picker-heading h3 {
-    margin: 0;
-    font-size: 15px;
-}
-
-.piecewise-picker-heading span {
-    padding: 3px 8px;
+.tooltip-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
     border-radius: 999px;
-    background: #1d4ed8;
-    color: #ffffff;
-    font-size: 12px;
+    border: 1px solid #9ca3af;
+    background: #f3f4f6;
+    color: #6b7280;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+}
+
+.piecewise-help {
+    width: 13px !important;
+    height: 13px !important;
+    border: 1px solid #9ca3af !important;
+    background: #f3f4f6 !important;
+    color: #6b7280 !important;
+    font-size: 8px !important;
+}
+
+.tooltip-inline-note {
+    max-width: 320px;
+    padding: 3px 0;
+    color: #374151;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.35;
+    white-space: normal;
+}
+
+.tooltip-inline-note strong {
+    display: block;
+    margin-bottom: 2px;
+    color: #4b5563;
+    font-size: 11px;
     font-weight: 700;
 }
 
-.piecewise-option {
-    margin-top: 10px;
-    padding: 10px;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    background: #ffffff;
-}
-
-.piecewise-option p {
-    margin: 4px 0 8px;
-    color: #64748b;
-    font-size: 12px;
-    line-height: 1.45;
-}
-
-.piecewise-toggle {
-    font-weight: 600;
-}
-
-.piecewise-base-select:disabled {
-    opacity: 0.58;
-    cursor: not-allowed;
-}
-
-.caret {
-    font-size: 11px;
-    opacity: 0.7;
+.tooltip-inline-note span {
+    display: block;
 }
 
 .section-heading {

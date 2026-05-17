@@ -4,6 +4,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+from UI.helpers_ai_advice import TASK_CONFIGS, _score_models
+
 BASE_FILES = [
     "framingham.xlsx",
     "gbsg.xlsx",
@@ -51,7 +53,6 @@ PIECEWISE_MODEL_PREFIXES = {
     "PiecewiseCensorAwareClassifWrapSA": "PiecewiseCensorAwareClassifWrapSA(",
 }
 
-PIECEWISE_ALLOWED_TIMES = {16}
 INCLUDE_PIECEWISE = True
 
 CLASSIFICATION_METRICS = [
@@ -118,15 +119,116 @@ def _piecewise_time(method_name):
     return int(match.group(1))
 
 
-def extract_piecewise_rows(df, dataset_name, target_method_col=None):
+def _piecewise_group_key(method_name):
+    match = re.match(r"^(Piecewise(?:CensorAware)?ClassifWrapSA)\(([^,]+),\s*times=(\d+)\)$", str(method_name))
+    if match is None:
+        return None
+    family, base_model, _ = match.groups()
+    return family, base_model
+
+
+def _best_piecewise_rows_by_group(df, method_col):
+    present = [m for m in CLASSIFICATION_METRICS if m in df.columns]
+    if not present:
+        return df
+
+    scored = df.copy()
+    rank_cols = []
+    for metric in present:
+        rank_col = metric + "_piecewise_rank"
+        ascending = metric not in HIGHER_BETTER
+        scored[rank_col] = pd.to_numeric(scored[metric], errors="coerce").rank(
+            ascending=ascending,
+            method="average",
+            na_option="bottom",
+        )
+        rank_cols.append(rank_col)
+
+    scored["__piecewise_rank_sum__"] = scored[rank_cols].sum(axis=1, numeric_only=True)
+    scored["__piecewise_time__"] = scored[method_col].map(_piecewise_time)
+    scored["__piecewise_group__"] = scored[method_col].map(_piecewise_group_key)
+    scored = scored[scored["__piecewise_group__"].notna()].copy()
+    scored = scored.sort_values(
+        ["__piecewise_group__", "__piecewise_rank_sum__", "__piecewise_time__"],
+        ascending=[True, True, True],
+    )
+    keep = scored.groupby("__piecewise_group__", sort=False).head(1).index
+    return df.loc[keep].copy()
+
+
+def compute_global_piecewise_times(tables_dir):
+    scores_by_group_time = {}
+    datasets_by_group = {}
+    metrics = TASK_CONFIGS["classification"]["metrics"]
+
+    for dataset_name, filename in PIECEWISE_FILES.items():
+        path = tables_dir / filename
+        if not path.exists():
+            continue
+        try:
+            df = pd.read_excel(path)
+            df, method_col = _prepare_method_frame(df, dataset_name)
+        except Exception:
+            continue
+
+        scored = df.rename(columns={column: str(column).strip().lower() for column in df.columns})
+        if "method" not in scored.columns:
+            continue
+
+        present_metrics = [
+            metric for metric in metrics
+            if str(metric["key"]).strip().lower() + "_mean" in scored.columns
+        ]
+        if not present_metrics:
+            continue
+
+        scored = _score_models(scored, present_metrics)
+        for _, row in scored.iterrows():
+            method_name = row["method"]
+            group = _piecewise_group_key(method_name)
+            times = _piecewise_time(method_name)
+            if group is None or times is None:
+                continue
+            scores_by_group_time.setdefault((group, times), []).append(float(row["ai_score"]))
+            datasets_by_group.setdefault(group, set()).add(dataset_name)
+
+    selected = {}
+    for group, datasets in datasets_by_group.items():
+        expected_count = len(datasets)
+        candidates = []
+        for (candidate_group, times), scores in scores_by_group_time.items():
+            if candidate_group != group:
+                continue
+            candidates.append((len(scores) == expected_count, float(np.mean(scores)), len(scores), times))
+
+        if not candidates:
+            continue
+
+        full = [candidate for candidate in candidates if candidate[0]]
+        pool = full or candidates
+        _, _, _, best_times = max(pool, key=lambda item: (item[1], item[2], -item[3]))
+        selected[group] = int(best_times)
+
+    return selected
+
+
+def extract_piecewise_rows(df, dataset_name, target_method_col=None, selected_times=None):
     df, method_col = _prepare_method_frame(df, dataset_name)
     mask = df[method_col].apply(
         lambda value: (
             _piecewise_public_name(value) is not None
-            and _piecewise_time(value) in PIECEWISE_ALLOWED_TIMES
+            and _piecewise_time(value) is not None
         )
     )
     df = df[mask].copy()
+    if selected_times is None:
+        df = _best_piecewise_rows_by_group(df, method_col)
+    else:
+        df = df[
+            df[method_col].apply(
+                lambda value: selected_times.get(_piecewise_group_key(value)) == _piecewise_time(value)
+            )
+        ].copy()
 
     if target_method_col and target_method_col != method_col:
         df = df.rename(columns={method_col: target_method_col})
@@ -297,6 +399,7 @@ def main():
 
     per_dataset = {}
     diagnostics = []
+    selected_piecewise_times = compute_global_piecewise_times(tables_dir) if INCLUDE_PIECEWISE else {}
 
     for path in paths:
         ds = path.stem
@@ -330,6 +433,7 @@ def main():
                             piecewise_df,
                             ds,
                             target_method_col=_find_method_col(base_df),
+                            selected_times=selected_piecewise_times,
                         )
                         piecewise_status = "ok" if not piecewise_rows.empty else "no_candidates"
                     except Exception as piecewise_exc:

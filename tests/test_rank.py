@@ -2,6 +2,7 @@ import pandas as pd
 
 from rank import (
     aggregate_overall,
+    compute_global_piecewise_times,
     compute_rank_block,
     extract_piecewise_rows,
     rank_dataset_blocks,
@@ -52,16 +53,19 @@ def test_rank_dataset_blocks_filters_methods_and_reports_missing_metrics():
     assert "IBS_mean" in diag["survival_missing"]
 
 
-def test_extract_piecewise_rows_keeps_allowed_times_and_prefixes():
+def test_extract_piecewise_rows_keeps_best_available_times_and_prefixes():
     df = pd.DataFrame(
         {
             "METHOD": [
                 "PiecewiseClassifWrapSA(LogisticRegression, times=16)",
                 "PiecewiseClassifWrapSA(LogisticRegression, times=8)",
                 "PiecewiseCensorAwareClassifWrapSA(RandomForestClassifier, times=16)",
+                "PiecewiseCensorAwareClassifWrapSA(RandomForestClassifier, times=4)",
                 "LogisticRegression",
             ],
-            "CI_mean": [0.8, 0.7, 0.85, 0.6],
+            "AUC_EVENT_mean": [0.70, 0.90, 0.85, 0.75, 0.6],
+            "LOGLOSS_EVENT_mean": [0.50, 0.20, 0.30, 0.45, 0.6],
+            "RMSE_EVENT_mean": [0.40, 0.20, 0.25, 0.35, 0.5],
         }
     )
 
@@ -72,10 +76,34 @@ def test_extract_piecewise_rows_keeps_allowed_times_and_prefixes():
     )
 
     assert method_col == "Method"
-    assert piecewise["Method"].tolist() == [
-        "PiecewiseClassifWrapSA(LogisticRegression, times=16)",
+    assert sorted(piecewise["Method"].tolist()) == sorted([
+        "PiecewiseClassifWrapSA(LogisticRegression, times=8)",
         "PiecewiseCensorAwareClassifWrapSA(RandomForestClassifier, times=16)",
-    ]
+    ])
+
+
+def test_global_piecewise_times_prefers_one_times_across_datasets(tmp_path):
+    pd.DataFrame(
+        {
+            "METHOD": [
+                "PiecewiseClassifWrapSA(LogisticRegression, times=8)",
+                "PiecewiseClassifWrapSA(LogisticRegression, times=16)",
+            ],
+            "AUC_EVENT_mean": [0.90, 0.70],
+        }
+    ).to_excel(tmp_path / "Piecewise_framingham.xlsx", index=False)
+    pd.DataFrame(
+        {
+            "METHOD": [
+                "PiecewiseClassifWrapSA(LogisticRegression, times=16)",
+            ],
+            "AUC_EVENT_mean": [0.80],
+        }
+    ).to_excel(tmp_path / "Piecewise_gbsg.xlsx", index=False)
+
+    selected = compute_global_piecewise_times(tmp_path)
+
+    assert selected[("PiecewiseClassifWrapSA", "LogisticRegression")] == 16
 
 
 def test_aggregate_overall_orders_by_mean_task_median():

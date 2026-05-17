@@ -13,7 +13,7 @@ import survivors.datasets as ds
 import survivors.constants as cnt
 from .helpers_ai_advice import AI_TASKS, build_ai_advice
 from .helpers_project_rag import build_project_rag_answer
-from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics
+from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics, select_best_piecewise_variant
 from .helpers_leaderboard import load_leaderboard_images, load_overall_leaderboard_rows
 from .helpers_piecewise import load_piecewise_classification_summary
 
@@ -130,9 +130,9 @@ MODELS = [
 ]
 
 
-PIECEWISE_TIMES = 16
 PIECEWISE_BASE_MODELS = [
     {"id": "DecisionTreeClassifier", "label": "DecisionTreeClassifier"},
+    {"id": "KNeighborsClassifier", "label": "KNeighborsClassifier"},
     {"id": "LogisticRegression", "label": "LogisticRegression"},
     {"id": "RandomForestClassifier", "label": "RandomForestClassifier"},
     {"id": "GradientBoostingClassifier", "label": "GradientBoostingClassifier"},
@@ -142,53 +142,74 @@ PIECEWISE_OPTIONS = [
         "id": "piecewise_plain",
         "family": "PiecewiseClassifWrapSA",
         "label": "PiecewiseClassifWrapSA",
-        "base_field": "piecewise_plain_base",
-        "description": "Интервальные классификаторы без отдельной censor-aware коррекции.",
+        "bases_field": "piecewise_plain_bases",
+        "description": (
+            "Улучшает модели классификации за счет учета временной структуры "
+            "события. Временной горизонт делится на равномерные интервалы, "
+            "для каждого интервала обучается отдельный классификатор риска. "
+            "Вместо одной вероятности события получается survival-кривая, "
+            "поэтому модель начинает различать ранние и поздние события."
+        ),
     },
     {
         "id": "piecewise_censor",
         "family": "PiecewiseCensorAwareClassifWrapSA",
         "label": "PiecewiseCensorAwareClassifWrapSA",
-        "base_field": "piecewise_censor_base",
-        "description": "Интервальные классификаторы с учетом цензурированных наблюдений.",
+        "bases_field": "piecewise_censor_bases",
+        "description": (
+            "Censor-aware версия PiecewiseClassifWrapSA. Она также строит "
+            "классификаторы риска на равномерных интервалах и формирует "
+            "survival-кривую, но аккуратнее работает с цензурированными "
+            "наблюдениями. Это улучшает классификационные модели на неполных "
+            "данных: классификатор не просто считает цензурированный объект "
+            "отсутствием события, а использует информацию о том, до какого "
+            "времени объект точно дожил."
+        ),
     },
 ]
 PIECEWISE_DEFAULT_BASE = "DecisionTreeClassifier"
 
 
-def _valid_piecewise_base(model_name: str) -> str:
-    allowed = {model["id"] for model in PIECEWISE_BASE_MODELS}
-    return model_name if model_name in allowed else PIECEWISE_DEFAULT_BASE
+def _valid_piecewise_bases(model_names: Optional[List[str]]) -> list[str]:
+    requested = set(model_names or [])
+    return [model["id"] for model in PIECEWISE_BASE_MODELS if model["id"] in requested]
 
 
 def build_piecewise_model_cfgs(
-    piecewise_families: Optional[List[str]],
-    piecewise_plain_base: str,
-    piecewise_censor_base: str,
+    base_dir: Path,
+    dataset_id: str,
+    task_id: str,
+    piecewise_plain_bases: Optional[List[str]],
+    piecewise_censor_bases: Optional[List[str]],
 ) -> list[dict]:
-    selected_families = set(piecewise_families or [])
     base_by_family = {
-        "PiecewiseClassifWrapSA": _valid_piecewise_base(piecewise_plain_base),
-        "PiecewiseCensorAwareClassifWrapSA": _valid_piecewise_base(piecewise_censor_base),
+        "PiecewiseClassifWrapSA": _valid_piecewise_bases(piecewise_plain_bases),
+        "PiecewiseCensorAwareClassifWrapSA": _valid_piecewise_bases(piecewise_censor_bases),
     }
 
     cfgs = []
     for option in PIECEWISE_OPTIONS:
         family = option["family"]
-        if family not in selected_families:
-            continue
-        base_model = base_by_family[family]
-        label = f"{family}({base_model}, times={PIECEWISE_TIMES})"
-        cfgs.append(
-            {
-                "id": f"piecewise::{family}::{base_model}::{PIECEWISE_TIMES}",
-                "label": label,
-                "lib": "survivors",
-                "task": "classification",
-                "param_grid": {},
-                "precomputed_only": True,
-            }
-        )
+        for base_model in base_by_family[family]:
+            label, _ = select_best_piecewise_variant(
+                base_dir=base_dir,
+                dataset_id=dataset_id,
+                family=family,
+                base_model=base_model,
+                task_id=task_id,
+            )
+            if not label:
+                continue
+            cfgs.append(
+                {
+                    "id": f"piecewise::{family}::{base_model}::{label}",
+                    "label": label,
+                    "lib": "survivors",
+                    "task": "classification",
+                    "param_grid": {},
+                    "precomputed_only": True,
+                }
+            )
     return cfgs
 
 
@@ -221,7 +242,6 @@ def home_context(request: Request, **overrides):
         "models": MODELS,
         "piecewise_options": PIECEWISE_OPTIONS,
         "piecewise_base_models": PIECEWISE_BASE_MODELS,
-        "piecewise_times": PIECEWISE_TIMES,
         "piecewise_default_base": PIECEWISE_DEFAULT_BASE,
         "selected": None,
         "plot_data": None,
@@ -311,16 +331,14 @@ async def compare_models(
     dataset_id: str = Form(...),
     preset_id: str = Form(...),
     model_ids: Optional[List[str]] = Form(None),
-    piecewise_families: Optional[List[str]] = Form(None),
-    piecewise_plain_base: str = Form(PIECEWISE_DEFAULT_BASE),
-    piecewise_censor_base: str = Form(PIECEWISE_DEFAULT_BASE),
+    piecewise_plain_bases: Optional[List[str]] = Form(None),
+    piecewise_censor_bases: Optional[List[str]] = Form(None),
     x_metric: Optional[str] = Form(None),
     y_metric: Optional[str] = Form(None),
 ):
     model_ids = model_ids or []
-    piecewise_families = piecewise_families or []
-    piecewise_plain_base = _valid_piecewise_base(piecewise_plain_base)
-    piecewise_censor_base = _valid_piecewise_base(piecewise_censor_base)
+    piecewise_plain_bases = _valid_piecewise_bases(piecewise_plain_bases)
+    piecewise_censor_bases = _valid_piecewise_bases(piecewise_censor_bases)
     preset = next((p for p in PRESETS if p["id"] == preset_id), None)
     xk = x_metric or (preset["x_metric"] if preset else None)
     yk = y_metric or (preset["y_metric"] if preset else None)
@@ -328,9 +346,8 @@ async def compare_models(
         "dataset_id": dataset_id,
         "preset_id": preset_id,
         "model_ids": model_ids,
-        "piecewise_families": piecewise_families,
-        "piecewise_plain_base": piecewise_plain_base,
-        "piecewise_censor_base": piecewise_censor_base,
+        "piecewise_plain_bases": piecewise_plain_bases,
+        "piecewise_censor_bases": piecewise_censor_bases,
         "x_metric": xk,
         "y_metric": yk,
     }
@@ -344,9 +361,11 @@ async def compare_models(
         ))
 
     piecewise_cfgs = build_piecewise_model_cfgs(
-        piecewise_families,
-        piecewise_plain_base,
-        piecewise_censor_base,
+        BASE_DIR,
+        dataset_id,
+        "classification",
+        piecewise_plain_bases,
+        piecewise_censor_bases,
     )
     selected_cfgs = [m for m in MODELS if m["id"] in model_ids] + piecewise_cfgs
 

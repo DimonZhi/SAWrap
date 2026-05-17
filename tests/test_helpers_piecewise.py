@@ -26,5 +26,5 @@ def test_load_piecewise_classification_summary_detects_score_gain(tmp_path: Path
     assert summary["model_rows"][0]["model"] == "DecisionTreeClassifier"
     assert summary["model_rows"][0]["win_rate"] == "100"
     assert summary["detail_rows"][0]["dataset"] == "ACTG"
-    assert summary["detail_rows"][0]["times"] == 16
-    assert summary["times_tested"] == "16"
+    assert summary["detail_rows"][0]["times"] == 8
+    assert summary["times_tested"] == "глобальный автовыбор одного times на Piecewise-модель"

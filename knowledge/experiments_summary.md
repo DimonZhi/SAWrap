@@ -72,7 +72,7 @@ ACTG и Smarto особенно важны для проверки survival-по
 - `PiecewiseClassifWrapSA`;
 - `PiecewiseCensorAwareClassifWrapSA`.
 
-В текущей версии интерфейса и итогового leaderboard используется единая временная сетка `times=16`.
+В текущей версии интерфейс и итоговый leaderboard не привязаны к вручную заданной временной сетке. Для каждой пары "Piecewise-обертка + базовый классификатор" система сначала выбирает один лучший `times` по всем датасетам, а затем использует только эту вариацию в таблицах результатов, лидерборде и графиках.
 
 Piecewise-times строит интервальные классификаторы и преобразует их в survival-кривую:
 
@@ -80,7 +80,7 @@ Piecewise-times строит интервальные классификатор
 S_hat(t_k | X) = prod_{j=1}^{k} (1 - p_j(X))
 ```
 
-По classification score, где `AUC_EVENT` имеет вес 45%, `LOGLOSS_EVENT` - 35%, `RMSE_EVENT` - 20%, самый сильный эффект при `times=16` получен для `DecisionTreeClassifier`: средний прирост +26.8 пункта по 7 датасетам. Улучшение для `DecisionTreeClassifier` наблюдалось на всех 7 датасетах; лучший кейс - GBSG, +53.7 пункта при `times=16`.
+По classification score, где `AUC_EVENT` имеет вес 45%, `LOGLOSS_EVENT` - 35%, `RMSE_EVENT` - 20%, самый сильный эффект при глобальном автовыборе получен для `DecisionTreeClassifier`: `PiecewiseClassifWrapSA(DecisionTreeClassifier, times=8)` улучшил все 7 датасетов со средним приростом +24.8 пункта, а `PiecewiseCensorAwareClassifWrapSA(DecisionTreeClassifier, times=16)` улучшил 6 из 7 датасетов и дал лучший кейс GBSG, +53.7 пункта.
 
 ## Метрики в исследовании
 

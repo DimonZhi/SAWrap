@@ -1,3 +1,5 @@
+import re
+
 import pandas as pd
 from pathlib import Path
 import numpy as np
@@ -5,6 +7,7 @@ import importlib
 from survivors.experiments import grid as exp
 from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 from sklearn.metrics import root_mean_squared_error, r2_score, roc_auc_score, log_loss
+from .helpers_ai_advice import TASK_CONFIGS, _score_models
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -20,6 +23,9 @@ PIECEWISE_TABLE_FILES = {
     "smarto": "Piecewise_smarto.xlsx",
     "support2": "Piecewise_support2.xlsx",
 }
+PIECEWISE_RE = re.compile(
+    r"^(Piecewise(?:CensorAware)?ClassifWrapSA)\(([^,]+),\s*times=(\d+)\)$"
+)
 
 
 def _norm(s: str) -> str:
@@ -29,6 +35,102 @@ def _norm(s: str) -> str:
 def is_piecewise_model_label(model_label: str) -> bool:
     label = str(model_label).strip()
     return label.startswith("PiecewiseClassifWrapSA(") or label.startswith("PiecewiseCensorAwareClassifWrapSA(")
+
+
+def _piecewise_match(model_label: str):
+    return PIECEWISE_RE.match(str(model_label).strip())
+
+
+def _active_task_metrics(df: pd.DataFrame, task_id: str) -> list[dict]:
+    task_config = TASK_CONFIGS.get(task_id) or TASK_CONFIGS["classification"]
+    metrics = []
+    for metric in task_config["metrics"]:
+        col = _norm(metric["key"]) + "_mean"
+        if col in df.columns and pd.to_numeric(df[col], errors="coerce").notna().any():
+            metrics.append(metric)
+    if metrics:
+        return metrics
+
+    fallback = []
+    for metric in TASK_CONFIGS["classification"]["metrics"]:
+        col = _norm(metric["key"]) + "_mean"
+        if col in df.columns and pd.to_numeric(df[col], errors="coerce").notna().any():
+            fallback.append(metric)
+    return fallback
+
+
+def select_global_piecewise_time(
+    base_dir: Path,
+    family: str,
+    base_model: str,
+    task_id: str = "classification",
+) -> int | None:
+    scores_by_time: dict[int, list[float]] = {}
+    datasets_with_model = 0
+
+    for dataset_id in PIECEWISE_TABLE_FILES:
+        table_path = get_piecewise_table_path(base_dir, dataset_id)
+        df = load_surv_df(table_path)
+        if df is None or df.empty or "method" not in df.columns:
+            continue
+
+        metrics = _active_task_metrics(df, task_id)
+        if not metrics:
+            continue
+
+        scored = _score_models(df, metrics)
+        dataset_scores: dict[int, float] = {}
+        for _, row in scored.iterrows():
+            method = str(row.get("method", ""))
+            match = _piecewise_match(method)
+            if not match:
+                continue
+            row_family, row_base_model, row_times = match.groups()
+            if row_family == family and row_base_model == base_model:
+                dataset_scores[int(row_times)] = float(row["ai_score"])
+
+        if not dataset_scores:
+            continue
+
+        datasets_with_model += 1
+        for times, score in dataset_scores.items():
+            scores_by_time.setdefault(times, []).append(score)
+
+    if not scores_by_time or datasets_with_model == 0:
+        return None
+
+    full_coverage = [
+        (float(np.mean(scores)), len(scores), times)
+        for times, scores in scores_by_time.items()
+        if len(scores) == datasets_with_model
+    ]
+    candidates = full_coverage or [
+        (float(np.mean(scores)), len(scores), times)
+        for times, scores in scores_by_time.items()
+    ]
+    _, _, best_times = max(candidates, key=lambda item: (item[0], item[1], -item[2]))
+    return int(best_times)
+
+
+def select_best_piecewise_variant(
+    base_dir: Path,
+    dataset_id: str,
+    family: str,
+    base_model: str,
+    task_id: str,
+) -> tuple[str | None, Path]:
+    table_path = get_piecewise_table_path(base_dir, dataset_id)
+    best_times = select_global_piecewise_time(base_dir, family, base_model, task_id)
+    if best_times is None:
+        return None, table_path
+
+    label = f"{family}({base_model}, times={best_times})"
+    df = load_surv_df(table_path)
+    if df is None or df.empty or "method" not in df.columns:
+        return None, table_path
+    if df[df["method"].astype(str) == label].empty:
+        return None, table_path
+    return label, table_path
 
 def import_class(path: str):
     module_name, class_name = path.rsplit(".", 1)
@@ -50,7 +152,13 @@ def get_surv_table_path(base_dir: Path, dataset_id: str) -> Path:
 def get_piecewise_table_path(base_dir: Path, dataset_id: str) -> Path:
     key = str(dataset_id).strip().lower()
     filename = PIECEWISE_TABLE_FILES.get(key, f"Piecewise_{key}.xlsx")
-    return (base_dir / "tables" / filename).resolve()
+    nested_path = base_dir / "tables" / filename
+    direct_path = base_dir / filename
+    if nested_path.exists():
+        return nested_path.resolve()
+    if direct_path.exists():
+        return direct_path.resolve()
+    return nested_path.resolve()
 
 
 def get_metric_table_path(base_dir: Path, dataset_id: str, model_label: str | None = None) -> Path:

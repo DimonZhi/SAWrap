@@ -68,10 +68,11 @@
           </p>
           <div class="formula-render">\[\widehat S(t_k\mid X)=\prod_{j=1}^{k}\left(1-\widehat p_j(X)\right)\]</div>
           <p>
-            В интерфейсе и итоговом leaderboard используется стабильный режим
-            <code>times=16</code>. Для <code>DecisionTreeClassifier</code> это дало
-            средний прирост classification score на <strong>+26.8</strong> пункта
-            по 7 датасетам.
+            Для каждой пары Piecewise-обертки и базового классификатора сначала
+            выбирается один лучший <code>times</code> по всем датасетам, а затем
+            именно эта вариация используется в результатах и графиках. Для
+            <code>DecisionTreeClassifier</code> такой автовыбор дает устойчивый
+            прирост classification score на 7 датасетах.
           </p>
         </div>
       </div>
@@ -300,7 +301,9 @@
         превращают классификационную модель в набор интервальных классификаторов.
         Каждый интервал оценивает условную вероятность события, а survival-кривая
         строится как произведение вероятностей пережить интервалы. В текущей версии
-        используется единая настройка: <code>times={{ piecewise_summary.times_tested if piecewise_summary else "16" }}</code>.
+        сайт сначала выбирает один лучший <code>times</code> для каждой пары
+        Piecewise-обертки и базового классификатора по всем датасетам, а потом
+        показывает в результатах и графиках только эту вариацию.
       </p>
 
       {% if piecewise_summary and piecewise_summary.available %}
@@ -319,7 +322,7 @@
         <table class="overview-data-table piecewise-table">
           <thead>
             <tr>
-              <th>Базовая модель</th>
+              <th>Piecewise-модель</th>
               <th>Датасетов</th>
               <th>Base score</th>
               <th>Piecewise score</th>
@@ -331,7 +334,7 @@
           <tbody>
             {% for row in piecewise_summary.model_rows %}
             <tr{% if row.is_strong %} class="is-top-row"{% endif %}>
-              <td>{{ row.model }}</td>
+              <td>{{ row.piecewise_model }}</td>
               <td>{{ row.datasets }}</td>
               <td>{{ row.base_score }}</td>
               <td>{{ row.piecewise_score }}</td>
