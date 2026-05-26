@@ -1,119 +1,536 @@
-SAWrap
+# SAWrap
 
-Локальный запуск:
-1. перейти в директорию уровнем выше репозитория
-2. запустить:
+SAWrap - исследовательский ML-сервис для сравнения классификационных,
+регрессионных моделей и моделей анализа выживаемости в задачах прогнозирования
+терминальных событий.
+
+Проект решает проблему: разные семейства моделей дают разные типы прогнозов.
+Классификация оценивает вероятность события, регрессия - время до события,
+анализ выживаемости - функцию выживаемости. SAWrap приводит эти ответы к
+единому представлению через функцию выживаемости и сравнивает модели в одной
+системе метрик.
+
+Главная формула:
+
+```text
+S(t | X) = P(T > t | X)
+```
+
+## Почему это важно
+
+В задачах времени до события часто есть цензурированные наблюдения: событие не
+наступило за период наблюдения, поэтому точное время события неизвестно.
+Обычная классификация и регрессия работают с такими данными некорректно или
+теряют часть информации. Анализ выживаемости учитывает цензурирование напрямую,
+а SAWrap позволяет сравнить его с классическими ML-моделями на одном языке.
+
+Примеры терминальных событий:
+
+- медицина: смерть, рецидив заболевания, развитие СПИД;
+- инженерия: отказ оборудования;
+- финансы: дефолт или уход клиента.
+
+## Что реализовано
+
+- FastAPI + Jinja2 веб-интерфейс для выбора датасета, моделей и метрик.
+- Plotly-графики для сравнения моделей.
+- Предрассчитанные таблицы результатов в `UI/tables`.
+- Итоговый leaderboard по всем датасетам и постановкам задачи.
+- AI-интерпретатор результатов через OpenRouter.
+- RAG-ассистент по проекту, диплому, коду, knowledge-базе и таблицам.
+- Semantic embeddings для RAG: `intfloat/multilingual-e5-small`.
+- Piecewise-times расширение для классификационных моделей.
+- Docker, CI, unit-тесты и примеры деплоя через nginx/systemd.
+
+## Научная идея
+
+Проект сравнивает три постановки задачи:
+
+| Подход | Исходный прогноз | Приведение к функции выживаемости |
+| --- | --- | --- |
+| Классификация | вероятность события `P_hat(X)` | `S_hat(t | X) = 1 - P_hat(X)` |
+| Регрессия | время события `T_hat(X)` | `S_hat(t | X) = I(t < T_hat(X))` |
+| Анализ выживаемости | функция выживаемости `S_hat(t | X)` | уже в нужном виде |
+
+Из общей функции выживаемости можно получить:
+
+- вероятность события: `1 - S_hat(t_max | X)`;
+- ожидаемое время: `int_0^t_max S_hat(t | X) dt`;
+- кривую выживаемости: `S_hat(t | X)`.
+
+## Обертки, добавленные в `survivors`
+
+В проекте используются три обертки, добавленные в библиотеку `survivors` для
+унификации разных типов моделей:
+
+| Обертка | Для каких моделей | Что делает |
+| --- | --- | --- |
+| `ClassifWrapSA` | классификаторы | переводит вероятность события в функцию выживаемости |
+| `RegrWrapSA` | регрессоры | переводит прогноз времени события в ступенчатую функцию выживаемости |
+| `SAWrapSA` | модели анализа выживаемости | задает общий интерфейс для моделей, которые уже возвращают функцию выживаемости или риск |
+
+Эти обертки позволяют сравнивать модели разных классов по одним и тем же
+метрикам события, времени и функции выживаемости.
+
+## Piecewise-times
+
+Обычный классификационный адаптер строит постоянную по времени оценку функции
+выживаемости. Piecewise-times делит временной горизонт на равномерные интервалы
+и обучает отдельный классификационный риск для каждого интервала:
+
+```text
+S_hat(t_k | X) = prod_{j=1}^{k} (1 - p_j(X))
+```
+
+Реализованы два варианта:
+
+- `PiecewiseClassifWrapSA`;
+- `PiecewiseCensorAwareClassifWrapSA`.
+
+Для каждой пары "Piecewise-обертка + базовый классификатор" система сначала
+выбирает один лучший `times` по всем датасетам, а затем использует только эту
+вариацию в графиках, AI-интерпретаторе и leaderboard.
+
+Как изменились метрики для `DecisionTreeClassifier`:
+
+| Piecewise-модель | Глобальный times | Изменение метрик | Место в итоговой таблице |
+| --- | ---: | --- | ---: |
+| `PiecewiseClassifWrapSA(DecisionTreeClassifier)` | 8 | `AUC_EVENT` выше в 5 из 7 датасетов, среднее изменение `+0.64 п.п.`; `LOGLOSS_EVENT` ниже во всех 7 датасетах, среднее снижение `35.1%`; `RMSE_EVENT` ниже в 4 из 7 датасетов | 23 |
+| `PiecewiseCensorAwareClassifWrapSA(DecisionTreeClassifier)` | 16 | `AUC_EVENT` выше в 4 из 7 датасетов; `LOGLOSS_EVENT` ниже во всех 7 датасетах, среднее снижение `35.5%`; `RMSE_EVENT` ниже в 3 из 7 датасетов | 16 |
+
+Лучший Piecewise-метод в общем leaderboard:
+
+```text
+PiecewiseCensorAwareClassifWrapSA(LogisticRegression, times=16)
+```
+
+Он занимает 3 место в `OVERALL_ALL` и имеет покрытие 7 из 7 датасетов.
+
+## Данные
+
+Используются 7 открытых наборов данных для анализа выживаемости из
+`survivors.datasets`:
+
+| Датасет | Наблюдений | Признаков | Событие |
+| --- | ---: | ---: | --- |
+| ACTG | 1151 | 11 | развитие СПИД |
+| GBSG | 686 | 8 | рецидив рака молочной железы |
+| PBC | 418 | 17 | смерть |
+| Rott2 | 2982 | 11 | смерть |
+| Smarto | 3873 | 26 | сердечно-сосудистое заболевание |
+| Framingham | 4699 | 7 | ишемическая болезнь сердца |
+| Support2 | 9105 | 35 | смерть |
+
+## Использованные модели
+
+Классификация:
+
+- `LogisticRegression`;
+- `SVC`;
+- `KNeighborsClassifier`;
+- `DecisionTreeClassifier`;
+- `RandomForestClassifier`;
+- `GradientBoostingClassifier`.
+
+Регрессия:
+
+- `ElasticNet`;
+- `SVR`;
+- `KNeighborsRegressor`;
+- `DecisionTreeRegressor`;
+- `RandomForestRegressor`;
+- `GradientBoostingRegressor`.
+
+Анализ выживаемости:
+
+- `KaplanMeierFitter`;
+- `CoxPHSurvivalAnalysis`;
+- `SurvivalTree`;
+- `RandomSurvivalForest`;
+- `GradientBoostingSurvivalAnalysis`;
+- `CRAID`;
+- `ParallelBootstrapCRAID`.
+
+Piecewise-расширение классификации:
+
+- `PiecewiseClassifWrapSA`;
+- `PiecewiseCensorAwareClassifWrapSA`.
+
+## Метрики
+
+В проекте используются 12 метрик. RAG и AI-интерпретатор дополнительно защищены
+от подстановки неиспользуемых метрик.
+
+Классификация:
+
+- `AUC_EVENT` - выше лучше;
+- `LOGLOSS_EVENT` - ниже лучше;
+- `RMSE_EVENT` - ниже лучше.
+
+Не используются как метрики проекта: `Accuracy`, `F1`, `Precision`, `Recall`.
+
+Регрессия:
+
+- `RMSE_TIME` - ниже лучше;
+- `R2_TIME` - выше лучше;
+- `MAPE_TIME` - ниже лучше;
+- `MEDAPE_TIME` - ниже лучше;
+- `SPEARMAN_TIME` - выше лучше;
+- `RMSLE_TIME` - ниже лучше.
+
+Не используются как метрики проекта: `MAE`, `MSE`, `MSLE`,
+`Explained variance`.
+
+Анализ выживаемости:
+
+- `CI` - выше лучше;
+- `IBS` - ниже лучше;
+- `AUPRC` - выше лучше.
+
+Не используется отдельная метрика `Logarithmic score`. `Brier score`
+используется только как основа для `IBS`, то есть Integrated Brier Score.
+
+## Экспериментальный сценарий
+
+1. Загружается один из 7 наборов данных из `survivors.datasets`.
+2. Данные приводятся к формату time-to-event: признаки, наблюдаемое время и
+   индикатор события.
+3. Для классификации, регрессии и анализа выживаемости задаются модели и сетки
+   гиперпараметров.
+4. Лучшие гиперпараметры выбираются через 5-кратную кросс-валидацию.
+5. Лучшие модели обучаются и проверяются в едином сценарии на 20 различных
+   разбиениях данных.
+6. Прогнозы всех моделей приводятся к функции выживаемости через `ClassifWrapSA`,
+   `RegrWrapSA` и `SAWrapSA`.
+7. Для Piecewise-моделей сначала выбирается один глобальный `times` для каждой
+   пары обертка + базовый классификатор.
+8. Считаются метрики события, времени и функции выживаемости.
+9. Результаты сохраняются в `UI/tables/*.xlsx`.
+10. Скрипт `rank.py` строит общий leaderboard в
+    `UI/tables/leaderboards_by_task.xlsx`.
+
+## Итоговые результаты
+
+Источник: `UI/tables/leaderboards_by_task.xlsx`, лист `OVERALL_ALL`.
+
+Текущий top-5 общего leaderboard:
+
+| Место | Метод | Датасетов | Средняя позиция |
+| ---: | --- | ---: | ---: |
+| 1 | `ParallelBootstrapCRAID` | 7 | 4.67 |
+| 2 | `CRAID` | 7 | 8.00 |
+| 3 | `PiecewiseCensorAwareClassifWrapSA(LogisticRegression, times=16)` | 7 | 9.00 |
+| 4 | `GradientBoostingSurvivalAnalysis` | 7 | 9.67 |
+| 5 | `PiecewiseCensorAwareClassifWrapSA(RandomForestClassifier, times=16)` | 7 | 9.67 |
+
+Интерпретация:
+
+- модели анализа выживаемости устойчиво сильны на цензурированных данных;
+- Piecewise-times становится конкурентной инженерной веткой и попадает в top-3;
+- классификационные и регрессионные модели можно корректно сравнивать с
+  моделями анализа выживаемости только после приведения прогнозов к общей
+  функции выживаемости.
+
+## Сценарии использования
+
+1. Локальный запуск экспериментов на пользовательских данных.
+
+   Текущая серверная конфигурация рассчитана на быстрый показ предрассчитанных
+   результатов и не предназначена для тяжелого обучения пользовательских
+   датасетов прямо на сервере. При этом экспериментальный сценарий и расчетный
+   модуль полностью готовы: проект можно скачать локально, запустить эксперименты
+   на своей машине, обновить таблицы результатов и пересчитать leaderboard.
+   После появления результатов AI-интерпретатор подскажет, какую модель лучше
+   использовать для конкретного датасета и задачи.
+
+```bash
+python3 run_many_server.py --dataset support2 --processes 1
+python3 rank.py
+```
+
+2. Выбор лучшей модели для задач терминальных событий по рейтингу.
+
+   Во вкладке `Результаты` или на странице `/leaderboard` отображается общий
+   leaderboard по всем датасетам и постановкам задачи. По рейтингу можно выбрать
+   модель для прогнозирования факта события, времени до события или функции
+   выживаемости. Источник рейтинга - файл `UI/tables/leaderboards_by_task.xlsx`.
+
+3. Использование разработанных оберток как библиотеки.
+
+   `ClassifWrapSA`, `RegrWrapSA` и `SAWrapSA` можно использовать отдельно от
+   сайта для самостоятельного исследования и разработки собственного pipeline.
+   Обертки приводят классификаторы, регрессоры и модели анализа выживаемости к
+   единому интерфейсу функции выживаемости.
+
+4. Использование экспериментального сценария библиотеки `survivors`.
+
+   Экспериментальный контур позволяет запускать модели из `survivors` с подбором
+   гиперпараметров, кросс-валидацией, серией разбиений и обертками SAWrap. Такой
+   сценарий подходит для воспроизводимого сравнения моделей в задачах времени до
+   события.
+
+5. Использование Piecewise-оберток для моделей классификации.
+
+   `PiecewiseClassifWrapSA` и `PiecewiseCensorAwareClassifWrapSA` представляют
+   модели классификации в терминах функции выживаемости. За счет разбиения
+   временного горизонта на интервалы классификатор получает временную структуру,
+   что улучшает качество отдельных моделей и делает их сопоставимыми с моделями
+   анализа выживаемости.
+
+## Архитектура
+
+```text
+SAWrap/
+  UI/
+    app.py                    FastAPI routes
+    helpers_tables.py          чтение таблиц и Piecewise-выбор
+    helpers_ai_advice.py       AI-интерпретатор результатов
+    helpers_project_rag.py     RAG-ассистент
+    helpers_piecewise.py       сводка Piecewise-times
+    templates/                 Jinja2-страницы
+    static/css/styles.css      интерфейс
+    tables/                    предрассчитанные результаты
+    images/                    графики leaderboard
+  knowledge/                   база знаний для RAG
+  scripts/build_rag_index.py   сборка semantic/TF-IDF индекса
+  rank.py                      пересчет leaderboard
+  run_many_server.py           экспериментальный запуск
+  tests/                       unit-тесты
+  Dockerfile
+  .github/workflows/ci.yml
+```
+
+## Быстрый запуск
+
+Рекомендуется запускать из директории уровнем выше репозитория:
+
+```bash
+cd /Users/dimonzhi/Documents/proga
 SAWRAP_SKIP_MISSING_RECALC=1 python3 -m uvicorn SAWrap.UI.app:app --host 0.0.0.0 --port 8000 --reload
+```
 
-Подготовка к GitHub:
-1. проверить remote:
-git remote -v
-2. добавить все файлы:
-git add .
-3. сделать коммит:
-git commit -m "Prepare GitHub and Docker deployment"
-4. отправить в GitHub:
-git push origin HEAD
+Открыть:
 
-Что добавлено для деплоя:
-- .gitignore
-- .dockerignore
-- requirements.txt
-- Dockerfile
-- deploy/docker-run.example.sh
-- deploy/nginx-sawrap-subdomain.conf.example
-- deploy/nginx-sawrap-location.conf.example
-
-Локальная проверка Docker:
-1. собрать образ:
-docker build -t sawrap:local .
-2. запустить:
-docker run --rm -p 8000:8000 -e SAWRAP_SKIP_MISSING_RECALC=1 sawrap:local
-3. открыть:
+```text
 http://127.0.0.1:8000
+```
 
-Проверки качества:
-1. установить тестовые зависимости:
-python3 -m pip install -r requirements-test.txt
-2. запустить unit-тесты:
-python3 -m pytest -q
-3. проверить компиляцию ключевых модулей:
-python3 -m compileall rank.py UI/helpers_leaderboard.py UI/helpers_ai_advice.py
+`SAWRAP_SKIP_MISSING_RECALC=1` включает быстрый режим: сайт читает
+предрассчитанные таблицы и не переобучает модели при открытии графиков.
 
-CI:
-- workflow лежит в .github/workflows/ci.yml
-- запускается на push и pull request
-- job Unit tests ставит requirements-test.txt, компилирует rank.py, UI/helpers_leaderboard.py и UI/helpers_ai_advice.py, запускает pytest
-- job Docker build собирает production-образ командой docker build -t sawrap:ci .
+## Docker
 
-AI-интерпретатор:
-- форма находится на главной странице
-- выбирает датасет и задачу: классификация события, прогноз времени или анализ выживаемости
-- читает предрассчитанную таблицу UI/tables/<dataset>.xlsx
-- считает итоговую оценку модели по направлению метрик и объясняет, почему выбран топовый метод
-- если задан OPENROUTER_API_KEY, дополнительно получает текстовую интерпретацию от OpenRouter
-- модель по умолчанию: openai/gpt-4o-mini
-- можно заменить модель через OPENROUTER_MODEL
+Сборка:
 
-RAG-ассистент по проекту:
-- форма находится на главной странице под AI-интерпретатором
-- ищет релевантные фрагменты в knowledge/*.md, README, ключевых файлах кода и таблицах UI/tables
-- отправляет найденный контекст во внешнюю LLM через OpenRouter
-- отвечает на вопросы по диплому, архитектуре, экспериментам, продуктовой части и методологии проекта
-- показывает источники, на которые опирался ответ
-- если OPENROUTER_API_KEY не задан, показывает найденный локальный контекст без LLM-обобщения
+```bash
+docker build -t sawrap:local .
+```
 
-Векторный RAG-индекс:
-- строится один раз локально и сохраняется в UI/rag_index
-- по умолчанию использует локальные semantic embeddings через sentence-transformers
-- fallback-режим использует TF-IDF-векторизацию через scikit-learn без внешних embedding API
-- включает knowledge/*.md, README, ключевые .py файлы, таблицы UI/tables и LaTeX-диплом из SAWRAP_THESIS_DIR
-- если индекс есть, RAG сначала ищет по векторному индексу; если индекса нет, использует обычный keyword fallback
-- UI/rag_index добавлен в .gitignore, чтобы случайно не залить полный текст диплома в GitHub
+Запуск:
 
-Установить зависимости для semantic embeddings:
-python3 -m pip install -r requirements-embeddings.txt
+```bash
+docker run --rm -p 8000:8000 -e SAWRAP_SKIP_MISSING_RECALC=1 sawrap:local
+```
 
-Собрать индекс:
-python3 scripts/build_rag_index.py
+Запуск с OpenRouter:
 
-Собрать TF-IDF fallback-индекс без sentence-transformers:
-python3 scripts/build_rag_index.py --retriever tfidf
+```bash
+docker run --rm -p 8000:8000 \
+  -e SAWRAP_SKIP_MISSING_RECALC=1 \
+  -e OPENROUTER_API_KEY="твой_ключ" \
+  -e OPENROUTER_MODEL="openai/gpt-4o-mini" \
+  sawrap:local
+```
 
-Если диплом лежит в другой папке:
-SAWRAP_THESIS_DIR="/path/to/ДипломML_SA-3" python3 scripts/build_rag_index.py
+## OpenRouter
 
-Модель embeddings по умолчанию:
-intfloat/multilingual-e5-small
+Пример переменных лежит в `.env.example`. Реальный `.env` игнорируется git.
 
-Для Docker с embeddings: установить requirements-embeddings.txt в образ или заранее адаптировать Dockerfile, затем собрать индекс и docker build. Папка UI/rag_index попадет в образ вместе с UI.
-
-OpenRouter:
-0. пример переменных лежит в .env.example, реальный .env уже игнорируется git
-1. локально:
+```bash
 export OPENROUTER_API_KEY="твой_ключ"
 export OPENROUTER_MODEL="openai/gpt-4o-mini"
-SAWRAP_SKIP_MISSING_RECALC=1 python3 -m uvicorn SAWrap.UI.app:app --host 0.0.0.0 --port 8000 --reload
-2. в Docker:
-docker run --rm -p 8000:8000 -e SAWRAP_SKIP_MISSING_RECALC=1 -e OPENROUTER_API_KEY="твой_ключ" -e OPENROUTER_MODEL="openai/gpt-4o-mini" sawrap:local
+```
 
-Рекомендуемый деплой на сервер:
-1. клонировать репозиторий:
-git clone https://github.com/DimonZhi/SAWrap /srv/survival_wrappers
-2. перейти в проект:
-cd /srv/survival_wrappers
-3. запустить пример вручную или адаптировать:
+AI-интерпретатор:
+
+- читает реальные метрики из `UI/tables`;
+- выбирает модель по задаче и датасету;
+- учитывает Piecewise-варианты для классификации;
+- объясняет, почему модель подходит;
+- при наличии ключа отправляет компактный контекст во внешнюю LLM.
+
+## RAG-ассистент
+
+RAG отвечает на вопросы по диплому, коду, таблицам, README и knowledge-базе.
+
+Источники:
+
+- `knowledge/*.md`;
+- `README.txt`;
+- ключевые Python-файлы;
+- `UI/tables/*.xlsx`;
+- LaTeX-диплом из `SAWRAP_THESIS_DIR`, если путь задан при сборке индекса.
+
+Установить зависимости для semantic embeddings:
+
+```bash
+python3 -m pip install -r requirements-embeddings.txt
+```
+
+Собрать semantic index:
+
+```bash
+SAWRAP_THESIS_DIR="/path/to/ДипломML_SA-3" python3 scripts/build_rag_index.py --retriever embeddings
+```
+
+Собрать TF-IDF fallback index:
+
+```bash
+python3 scripts/build_rag_index.py --retriever tfidf
+```
+
+Индекс сохраняется в `UI/rag_index` и не должен попадать в git, чтобы не
+публиковать полный текст диплома.
+
+## Пересчет leaderboard
+
+После обновления таблиц результатов:
+
+```bash
+python3 rank.py
+```
+
+Результат:
+
+```text
+UI/tables/leaderboards_by_task.xlsx
+```
+
+Piecewise-строки добавляются в leaderboard только после глобального выбора
+одного `times` для каждой пары обертка + базовая модель.
+
+## Проверки качества
+
+Установить тестовые зависимости:
+
+```bash
+python3 -m pip install -r requirements-test.txt
+```
+
+Запустить unit-тесты:
+
+```bash
+python3 -m pytest -q
+```
+
+Проверить компиляцию:
+
+```bash
+python3 -m compileall UI tests scripts rank.py
+```
+
+Текущий набор тестов покрывает:
+
+- ранжирование и leaderboard;
+- чтение таблиц метрик;
+- Piecewise-times выбор;
+- AI-интерпретатор;
+- OpenRouter transport через fake opener;
+- RAG retrieval, prompt guardrails и запрет выдуманных метрик.
+
+## CI
+
+Workflow: `.github/workflows/ci.yml`.
+
+CI запускается на `push` и `pull_request`:
+
+- установка test-зависимостей;
+- compileall ключевых модулей;
+- `pytest -q`;
+- Docker build.
+
+## Деплой
+
+В `deploy/` лежат примеры:
+
+- `deploy/docker-run.example.sh`;
+- `deploy/sawrap.service.example`;
+- `deploy/nginx-sawrap-subdomain.conf.example`;
+- `deploy/nginx-sawrap-location.conf.example`.
+
+Рекомендуемый серверный сценарий:
+
+```bash
+git clone https://github.com/DimonZhi/SAWrap /srv/sawrap
+cd /srv/sawrap
+docker build -t sawrap:local .
 deploy/docker-run.example.sh
-4. наружу публиковать через nginx, а не через прямой порт контейнера
+```
 
-Ресурсные ограничения для маленького VPS:
-- CPU: 0.40
-- RAM: 800m
-- pids-limit: 128
-- workers: 1
-- SAWRAP_SKIP_MISSING_RECALC=1
+Наружу лучше публиковать через nginx, а не прямым портом контейнера.
 
-Публикация наружу:
-- лучший вариант: отдельный поддомен через deploy/nginx-sawrap-subdomain.conf.example
-- вариант под путём /sawrap/: deploy/nginx-sawrap-location.conf.example
-- если публикуешь под /sawrap, добавь SAWRAP_ROOT_PATH=/sawrap
+Для публикации под путем `/sawrap`:
+
+```bash
+export SAWRAP_ROOT_PATH=/sawrap
+```
+
+## Что показать жюри
+
+Разработка и инженерия:
+
+- Dockerfile;
+- GitHub Actions CI;
+- unit-тесты;
+- `.env.example`, `.gitignore`, `.dockerignore`;
+- предрассчитанные таблицы и воспроизводимый leaderboard;
+- разделение backend, таблиц, RAG, AI и UI;
+- три обертки в `survivors`: `ClassifWrapSA`, `RegrWrapSA`, `SAWrapSA`.
+
+Data Science:
+
+- 7 наборов данных для анализа выживаемости;
+- полный список использованных моделей;
+- 12 метрик;
+- 5-fold CV, подбор гиперпараметров и 20 разбиений;
+- работа с цензурированными наблюдениями;
+- итоговый leaderboard.
+
+Применение AI:
+
+- AI-интерпретатор результатов;
+- OpenRouter integration;
+- RAG-ассистент по диплому, коду и таблицам;
+- semantic embeddings;
+- guardrails против выдуманных метрик.
+
+Продуктовое мышление:
+
+- понятная проблема сравнения моделей на данных времени до события;
+- целевая аудитория: ML-исследователи, студенты, data scientists, медицинские аналитики;
+- MVP в виде веб-сервиса;
+- практический эффект: быстрее выбрать и объяснить модель;
+- roadmap: загрузка пользовательского датасета, auto-report, мониторинг качества.
+
+## Скриншоты и графики
+
+Готовые изображения leaderboard лежат в `UI/images`:
+
+- `UI/images/Classif_vs_SA_rus.png`;
+- `UI/images/Regr_vs_SA_rus.png`;
+- `UI/images/Classif_vs_Regr_rus.png`.
+
+На сайте ключевые страницы:
+
+- `/` - выбор датасета, график метрик, AI-интерпретатор, RAG;
+- `/overview` - цель, методология, модели, эксперимент, результаты, сценарии использования;
+- `/leaderboard` - общий leaderboard и изображения сравнения.
+
+## Roadmap
+
+- Загрузка пользовательского датасета через UI.
+- Автоматический отчет по выбранному датасету и моделям.
+- Отдельная EDA-вкладка с распределением времени, долей цензурирования и missing values.
+- Расширение Piecewise-стратегий.
+- Мониторинг качества и сохранение истории экспериментов.
+- Набор контрольных вопросов для оценки качества RAG-ответов.
