@@ -81,17 +81,43 @@ $$
 
 | Подход | Исходный прогноз | Приведение к функции выживаемости |
 |---|---|---|
-| Классификация | $\widehat P(X)$ | $\widehat S(t \mid X)=1-\widehat P(X)$ |
-| Регрессия | $\widehat T(X)$ | $\widehat S(t \mid X)=\mathbb{I}(t<\widehat T(X))$ |
-| Анализ выживаемости | $\widehat S(t \mid X)$ | Уже находится в нужном виде |
+| Классификация | Вероятность события | Постоянная по времени функция выживаемости |
+| Регрессия | Прогноз времени события | Ступенчатая функция выживаемости |
+| Анализ выживаемости | Функция выживаемости | Уже находится в нужном виде |
+
+Формулы приведения:
+
+$$
+\widehat S_{\mathrm{clf}}(t \mid X)=1-\widehat P(X)
+$$
+
+$$
+\widehat S_{\mathrm{reg}}(t \mid X)=\mathbb{I}(t<\widehat T(X))
+$$
+
+$$
+\widehat S_{\mathrm{surv}}(t \mid X)=\widehat S(t \mid X)
+$$
 
 Из общей функции выживаемости получаются три согласованных прогноза:
 
-| Что нужно получить | Формула |
+| Что нужно получить | Как получается |
 |---|---|
-| Вероятность события | $\widehat P(T\le t_{\max}\mid X)=1-\widehat S(t_{\max}\mid X)$ |
-| Ожидаемое время | $\widehat T(X)=\int_0^{t_{\max}}\widehat S(t\mid X)\,dt$ |
-| Кривая выживаемости | $\widehat S(t\mid X)$ |
+| Вероятность события | Через значение функции выживаемости на максимальном горизонте |
+| Ожидаемое время | Через интеграл от функции выживаемости |
+| Кривая выживаемости | Напрямую как общий прогноз |
+
+$$
+\widehat P(T\le t_{\max}\mid X)=1-\widehat S(t_{\max}\mid X)
+$$
+
+$$
+\widehat T(X)=\int_0^{t_{\max}}\widehat S(t\mid X)\,dt
+$$
+
+$$
+\widehat S(t\mid X)
+$$
 
 ```mermaid
 flowchart LR
@@ -153,9 +179,8 @@ flowchart LR
 | Классификация | `LogisticRegression`, `SVC`, `KNeighborsClassifier`, `DecisionTreeClassifier`, `RandomForestClassifier`, `GradientBoostingClassifier` |
 | Регрессия | `ElasticNet`, `SVR`, `KNeighborsRegressor`, `DecisionTreeRegressor`, `RandomForestRegressor`, `GradientBoostingRegressor` |
 | Анализ выживаемости | `KaplanMeierFitter`, `CoxPHSurvivalAnalysis`, `SurvivalTree`, `RandomSurvivalForest`, `GradientBoostingSurvivalAnalysis`, `CRAID`, `ParallelBootstrapCRAID` |
-| Piecewise-расширение | `PiecewiseClassifWrapSA`, `PiecewiseCensorAwareClassifWrapSA` |
 
-### Обертки, добавленные в `survivors`
+### Обертки, добавленные в библиотеку `survivors`
 
 | Обертка | Для каких моделей | Что делает |
 |---|---|---|
@@ -189,13 +214,6 @@ $$
 выбирает один лучший `times` по всем датасетам, а затем использует только эту
 вариацию в графиках, AI-интерпретаторе и итоговом leaderboard.
 
-### Эффект для `DecisionTreeClassifier`
-
-| Piecewise-модель | Выбранный `times` | Изменение метрик | Место в итоговой таблице |
-|---|---:|---|---:|
-| `PiecewiseClassifWrapSA(DecisionTreeClassifier)` | 8 | `AUC_EVENT` выше в 5 из 7 датасетов, `LOGLOSS_EVENT` ниже во всех 7 датасетах, `RMSE_EVENT` ниже в 4 из 7 датасетов | 23 |
-| `PiecewiseCensorAwareClassifWrapSA(DecisionTreeClassifier)` | 16 | `AUC_EVENT` выше в 4 из 7 датасетов, `LOGLOSS_EVENT` ниже во всех 7 датасетах, `RMSE_EVENT` ниже в 3 из 7 датасетов | 16 |
-
 Лучший Piecewise-метод в общем leaderboard:
 
 | Место | Метод | Датасетов | Средняя позиция |
@@ -211,33 +229,61 @@ $$
 
 ### Метрики события
 
-| Метрика | Направление | Формула или смысл |
+| Метрика | Направление | Смысл |
 |---|---|---|
-| `AUC_EVENT` | Выше лучше | $\mathrm{AUC}=\frac{1}{n_1n_0}\sum_{i:Y_i=1}\sum_{j:Y_j=0}\mathbb{I}(\widehat P_i>\widehat P_j)$ |
-| `LOGLOSS_EVENT` | Ниже лучше | $-\frac{1}{n}\sum_i\left[Y_i\ln \widehat P_i+(1-Y_i)\ln(1-\widehat P_i)\right]$ |
-| `RMSE_EVENT` | Ниже лучше | $\sqrt{\frac{1}{n}\sum_i(Y_i-\widehat P_i)^2}$ |
+| `AUC_EVENT` | Выше лучше | Качество ранжирования объектов по вероятности события |
+| `LOGLOSS_EVENT` | Ниже лучше | Штраф за ошибочные вероятностные прогнозы |
+| `RMSE_EVENT` | Ниже лучше | Среднеквадратичная ошибка вероятности события |
+
+Формулы метрик события:
+
+$$
+\mathrm{AUC}=\frac{1}{n_1n_0}\sum_{i:Y_i=1}\sum_{j:Y_j=0}\mathbb{I}(\widehat P_i>\widehat P_j)
+$$
+
+$$
+\mathrm{LogLoss}=-\frac{1}{n}\sum_i\left[Y_i\ln \widehat P_i+(1-Y_i)\ln(1-\widehat P_i)\right]
+$$
+
+$$
+\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum_i(Y_i-\widehat P_i)^2}
+$$
 
 ### Метрики времени
 
-| Метрика | Направление | Формула или смысл |
+| Метрика | Направление | Смысл |
 |---|---|---|
-| `RMSE_TIME` | Ниже лучше | $\sqrt{\frac{1}{n}\sum_i(\widetilde T_i-\widehat T_i)^2}$ |
-| `R2_TIME` | Выше лучше | $1-\frac{\sum_i(\widetilde T_i-\widehat T_i)^2}{\sum_i(\widetilde T_i-\overline T)^2}$ |
+| `RMSE_TIME` | Ниже лучше | Корень из среднеквадратичной ошибки времени |
+| `R2_TIME` | Выше лучше | Доля объясненной вариации времени события |
 | `MAPE_TIME` | Ниже лучше | Средняя абсолютная процентная ошибка |
 | `MEDAPE_TIME` | Ниже лучше | Медианная абсолютная процентная ошибка |
 | `SPEARMAN_TIME` | Выше лучше | Ранговая корреляция Спирмена |
 | `RMSLE_TIME` | Ниже лучше | Ошибка по логарифмированному времени |
 
+Формулы ключевых метрик времени:
+
+$$
+\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum_i(\widetilde T_i-\widehat T_i)^2}
+$$
+
+$$
+R^2=1-\frac{\sum_i(\widetilde T_i-\widehat T_i)^2}{\sum_i(\widetilde T_i-\overline T)^2}
+$$
+
 ### Метрики функции выживаемости
 
-| Метрика | Направление | Формула или смысл |
+| Метрика | Направление | Смысл |
 |---|---|---|
 | `CI` | Выше лучше | Доля согласованных сравнимых пар |
-| `IBS` | Ниже лучше | $\mathrm{IBS}=\frac{1}{t_{\max}}\int_0^{t_{\max}}BS(t)\,dt$ |
+| `IBS` | Ниже лучше | Интегральная ошибка вероятностной функции выживаемости |
 | `AUPRC` | Выше лучше | Площадь под precision-recall кривой для функции выживаемости |
 
-Не используются как метрики проекта: `Accuracy`, `F1`, `Precision`, `Recall`,
-`MAE`, `MSE`, `MSLE`, `Explained variance`, отдельный `Logarithmic score`.
+Формула `IBS`:
+
+$$
+\mathrm{IBS}=\frac{1}{t_{\max}}\int_0^{t_{\max}}BS(t)\,dt
+$$
+
 
 ---
 
@@ -311,7 +357,6 @@ RAG отвечает на вопросы по проекту, диплому, к
 Сборка semantic index:
 
 ```bash
-SAWRAP_THESIS_DIR="/path/to/ДипломML_SA-3" \
 python3 scripts/build_rag_index.py --retriever embeddings
 ```
 
@@ -494,24 +539,3 @@ CI workflow находится в `.github/workflows/ci.yml` и запускае
 | `UI/images/Classif_vs_Regr_rus.png` | Классификация против регрессии |
 
 ---
-
-## Сильные стороны проекта
-
-| Критерий | Что показывает проект |
-|---|---|
-| Разработка и инженерия | Git, Docker, CI, тесты, модульная структура, воспроизводимый leaderboard |
-| Data Science | EDA, предобработка, 7 датасетов, 12 метрик, валидация, подбор гиперпараметров |
-| Применение AI | AI-интерпретатор, OpenRouter, RAG, semantic embeddings, guardrails |
-| Продуктовое мышление | Понятная проблема, целевая аудитория, MVP, сценарии использования, roadmap |
-
----
-
-## Roadmap
-
-| Направление | Следующий шаг |
-|---|---|
-| Пользовательские данные | Загрузка датасета через UI и автоматическая проверка схемы |
-| Auto-report | Генерация отчета по выбранному датасету, моделям и метрикам |
-| Piecewise | Дополнительные стратегии построения временной сетки |
-| MLOps | История запусков, мониторинг качества и версионирование экспериментов |
-| RAG quality | Набор контрольных вопросов для оценки полноты ответов |
