@@ -9,6 +9,7 @@
 - `.github/workflows/ci.yml` запускает unit-тесты, компиляцию ключевых модулей и Docker build.
 - `.gitignore` и `.dockerignore` защищают локальные артефакты, `.env` и RAG-индекс от случайной публикации.
 - `requirements.txt`, `requirements-test.txt` и `requirements-embeddings.txt` разделяют runtime, test и embedding-зависимости.
+- `Makefile` задает единые команды разработки: `make run`, `make test`, `make smoke`, `make rank`, `make rag`, `make docker-build`.
 - Примеры `deploy/` показывают запуск через Docker, systemd и nginx.
 
 ## Архитектура
@@ -20,6 +21,24 @@
 - `UI/helpers_project_rag.py` - RAG-ассистент по проекту, knowledge-базе, коду и диплому.
 - `UI/helpers_piecewise.py` - расчет сводки по Piecewise-times таблицам для доказательства улучшения классификационных моделей.
 - `scripts/build_rag_index.py` - сборка локального semantic/TF-IDF индекса.
+- `scripts/smoke_test.py` - быстрая проверка, что ключевые страницы сайта рендерятся через FastAPI TestClient.
+
+## Инженерная воспроизводимость
+
+Проект запускается через единый слой команд, а не набором ручных действий:
+
+| Команда | Назначение |
+| --- | --- |
+| `make run` | локальный запуск FastAPI-сайта с быстрым режимом предрассчитанных таблиц |
+| `make test` | unit-тесты проекта |
+| `make smoke` | smoke-test страниц `/`, `/overview`, `/leaderboard` и `/link` |
+| `make compile` | проверка компиляции Python-модулей |
+| `make ci` | локальная связка `compile + test + smoke` |
+| `make rank` | пересчет итогового leaderboard |
+| `make rag` | пересборка semantic RAG-индекса |
+
+GitHub Actions использует Makefile-команды, поэтому локальная проверка и CI
+выполняют один и тот же сценарий.
 
 ## ML-пайплайн
 

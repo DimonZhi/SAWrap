@@ -23,7 +23,7 @@ from UI.helpers_project_rag import (  # noqa: E402
 )
 
 
-DEFAULT_THESIS_DIR = Path("/Users/dimonzhi/Downloads/ДипломML_SA-3")
+DEFAULT_THESIS_DIR = Path("/Users/dimonzhi/Documents/proga/diplom_doc/ДипломML_SA")
 
 
 def _resolve_optional_path(raw: str | None) -> Path | None:

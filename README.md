@@ -301,7 +301,7 @@ RAG отвечает на вопросы по проекту, диплому, к
 Сборка semantic index:
 
 ```bash
-python3 scripts/build_rag_index.py --retriever embeddings
+make rag
 ```
 
 Индекс сохраняется в `UI/rag_index` и не должен попадать в git.
@@ -322,7 +322,7 @@ python3 scripts/build_rag_index.py --retriever embeddings
 
 ```bash
 python3 run_many_server.py --dataset support2 --processes 1
-python3 rank.py
+make rank
 ```
 
 Пример использования обертки:
@@ -357,23 +357,44 @@ SAWrap/
     images/                    графики leaderboard
   knowledge/                   база знаний для RAG
   scripts/build_rag_index.py   сборка semantic/TF-IDF индекса
+  scripts/smoke_test.py        быстрая проверка ключевых страниц
   rank.py                      пересчет leaderboard
   run_many_server.py           экспериментальный запуск
   tests/                       unit-тесты
+  Makefile                     единые инженерные команды
   Dockerfile
   .github/workflows/ci.yml
 ```
 
 ---
 
+## Инженерные команды
+
+Проект можно запускать не набором ручных команд, а через единый `Makefile`.
+Это фиксирует воспроизводимый инженерный сценарий для разработки, тестов,
+пересчета результатов и сборки RAG.
+
+| Команда | Что делает |
+|---|---|
+| `make help` | Показывает все доступные команды |
+| `make run` | Запускает локальный FastAPI-сайт с `--reload` |
+| `make test` | Запускает unit-тесты |
+| `make smoke` | Проверяет, что ключевые страницы сайта рендерятся без ошибок |
+| `make compile` | Проверяет компиляцию Python-модулей |
+| `make ci` | Выполняет `compile`, `test` и `smoke` как локальную CI-проверку |
+| `make rank` | Пересчитывает итоговый leaderboard |
+| `make rag` | Пересобирает semantic RAG-индекс |
+| `make rag-tfidf` | Пересобирает TF-IDF fallback индекс |
+| `make docker-build` | Собирает Docker-образ |
+
+---
+
 ## Быстрый запуск
 
-Рекомендуется запускать из директории уровнем выше репозитория.
+Рекомендуемый запуск из корня репозитория:
 
 ```bash
-cd /Users/dimonzhi/Documents/proga
-SAWRAP_SKIP_MISSING_RECALC=1 \
-python3 -m uvicorn SAWrap.UI.app:app --host 0.0.0.0 --port 8000 --reload
+make run
 ```
 
 Открыть сайт:
@@ -442,13 +463,25 @@ python3 -m pip install -r requirements-test.txt
 Запуск тестов:
 
 ```bash
-python3 -m pytest -q
+make test
 ```
 
 Проверка компиляции:
 
 ```bash
-python3 -m compileall UI tests scripts rank.py
+make compile
+```
+
+Smoke-test ключевых страниц:
+
+```bash
+make smoke
+```
+
+Локальная CI-проверка:
+
+```bash
+make ci
 ```
 
 Что покрывают тесты:
@@ -459,7 +492,8 @@ python3 -m compileall UI tests scripts rank.py
 | Piecewise | Выбор глобального `times` и согласованность результатов |
 | AI | Интерпретатор, OpenRouter transport через fake opener |
 | RAG | Retrieval, prompt guardrails, запрет выдуманных метрик |
-| Сборка | `compileall` и Docker build в CI |
+| Smoke-test | Рендеринг `/`, `/overview`, `/leaderboard` и `/link` через FastAPI TestClient |
+| Сборка | `make compile`, `make test`, `make smoke` и Docker build в CI |
 
 CI workflow находится в `.github/workflows/ci.yml` и запускается на `push` и
 `pull_request`.

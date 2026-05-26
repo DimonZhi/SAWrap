@@ -37,9 +37,12 @@ KNOWLEDGE_GLOBS = [
 
 TEXT_SOURCE_PATHS = [
     "README.md",
+    "Makefile",
+    ".github/workflows/ci.yml",
     "rank.py",
     "wrapSA.py",
     "run_many_server.py",
+    "scripts/smoke_test.py",
     "UI/app.py",
     "UI/helpers_ai_advice.py",
     "UI/helpers_tables.py",
