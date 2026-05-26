@@ -27,7 +27,7 @@ RAG-ассистент отвечает на вопросы по проекту,
 Источники RAG:
 
 - `knowledge/*.md`;
-- `README.txt`;
+- `README.md`;
 - ключевые Python-файлы;
 - таблицы `UI/tables`;
 - LaTeX-диплом из `SAWRAP_THESIS_DIR`, если индекс собран с этим путем.

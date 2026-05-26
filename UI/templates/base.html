@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>{% block title %}SAWrapSA{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260518a" rel="stylesheet">
+    <link href="{{ url_for('static', path='css/styles.css') }}?v=20260526a" rel="stylesheet">
     <script>
     window.MathJax = {
       tex: {
@@ -35,6 +35,9 @@
                     </a>
                     <a href="{{ url_for('overview_page') }}#models" class="topmenu-item">
                         Модели
+                    </a>
+                    <a href="{{ url_for('overview_page') }}#eda" class="topmenu-item">
+                        EDA
                     </a>
                     <a href="{{ url_for('overview_page') }}#experiment" class="topmenu-item">
                         Экспериментальный сценарий

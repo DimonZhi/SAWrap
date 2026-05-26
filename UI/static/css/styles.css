@@ -1118,7 +1118,7 @@ body {
 }
 
 .dataset-table {
-    min-width: 860px;
+    min-width: 1120px;
 }
 
 .models-table {
@@ -1131,6 +1131,65 @@ body {
 
 .piecewise-table {
     min-width: 880px;
+}
+
+.eda-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.eda-kpi-card {
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f0fdf4 0%, #f8fafc 100%);
+    padding: 14px;
+}
+
+.eda-kpi-card span {
+    display: block;
+    color: #166534;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.eda-kpi-card strong {
+    display: block;
+    margin: 6px 0;
+    color: #0f172a;
+    font-size: 28px;
+    line-height: 1;
+}
+
+.eda-kpi-card p {
+    margin: 0;
+    color: #475569;
+}
+
+.eda-censor-value {
+    display: block;
+    margin-bottom: 6px;
+    color: #0f172a;
+    font-weight: 800;
+}
+
+.eda-censor-track {
+    display: block;
+    width: 132px;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e2e8f0;
+}
+
+.eda-censor-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #22c55e 0%, #0ea5e9 100%);
 }
 
 .piecewise-kpis {
@@ -1431,6 +1490,7 @@ body {
     .overview-panel-grid,
     .criteria-grid,
     .metrics-grid,
+    .eda-kpi-grid,
     .piecewise-kpis,
     .scenario-grid,
     .result-strip {

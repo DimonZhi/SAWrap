@@ -6,8 +6,8 @@
   <span class="overview-eyebrow">SAWrap</span>
   <h1>Сравнение моделей для прогнозирования терминальных событий</h1>
   <p class="page-subtitle">
-    Обзор цели исследования, методологии разработки, экспериментального сценария,
-    результатов и пользовательского сценария работы с системой.
+    Обзор цели исследования, методологии разработки, EDA, экспериментального сценария,
+    результатов и пользовательских сценариев работы с системой.
   </p>
 </div>
 
@@ -16,6 +16,7 @@
     <button class="overview-tab is-active" type="button" data-tab="goal">Цель проекта</button>
     <button class="overview-tab" type="button" data-tab="methodology">Методология разработки</button>
     <button class="overview-tab" type="button" data-tab="models">Модели</button>
+    <button class="overview-tab" type="button" data-tab="eda">EDA</button>
     <button class="overview-tab" type="button" data-tab="experiment">Экспериментальный сценарий</button>
     <button class="overview-tab" type="button" data-tab="results">Результаты</button>
     <button class="overview-tab" type="button" data-tab="usage">Сценарии использования</button>
@@ -386,6 +387,188 @@
     </div>
   </article>
 
+  <article class="overview-panel" data-panel="eda" id="eda">
+    <span class="overview-kicker">Data Science</span>
+    <h2>EDA и структура наборов данных</h2>
+    <p>
+      EDA показывает, в каких условиях проверяется методология: медицинские наборы
+      данных отличаются размером, числом признаков, долей цензурированных наблюдений
+      и количеством пропусков. Все наборы приводятся к единому time-to-event виду:
+      признаки объекта \(X\), наблюдаемое время \(\widetilde T\) и индикатор события \(\delta\).
+    </p>
+
+    <div class="eda-kpi-grid">
+      <div class="eda-kpi-card">
+        <span>Наборов данных</span>
+        <strong>7</strong>
+        <p>ACTG, GBSG, PBC, Rott2, Smarto, Framingham и Support2.</p>
+      </div>
+      <div class="eda-kpi-card">
+        <span>Наблюдений</span>
+        <strong>22 914</strong>
+        <p>Суммарный объем выборок, использованных в экспериментальном сценарии.</p>
+      </div>
+      <div class="eda-kpi-card">
+        <span>Признаков</span>
+        <strong>7-35</strong>
+        <p>Проверяются как компактные таблицы, так и более широкие медицинские данные.</p>
+      </div>
+      <div class="eda-kpi-card">
+        <span>Цензурирование</span>
+        <strong>31,89-91,66%</strong>
+        <p>Высокая доля неполных наблюдений делает прямое сравнение моделей сложным.</p>
+      </div>
+    </div>
+
+    <div class="overview-table-block">
+      <h3>Наборы данных в исследовании</h3>
+      <div class="overview-table-wrap">
+        <table class="overview-data-table dataset-table">
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>N наблюдений</th>
+              <th>N признаков</th>
+              <th>Категориальных</th>
+              <th>Целевые переменные</th>
+              <th>Цензурирование</th>
+              <th>Пропуски</th>
+              <th>Терминальное событие</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ACTG</td>
+              <td>1151</td>
+              <td>11</td>
+              <td>7</td>
+              <td><code>time</code>, <code>event</code></td>
+              <td>
+                <span class="eda-censor-value">91,66%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 91.66%"></span></span>
+              </td>
+              <td>0</td>
+              <td>СПИД</td>
+            </tr>
+            <tr>
+              <td>GBSG</td>
+              <td>686</td>
+              <td>8</td>
+              <td>3</td>
+              <td><code>rfst</code>, <code>cens</code></td>
+              <td>
+                <span class="eda-censor-value">56,41%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 56.41%"></span></span>
+              </td>
+              <td>0</td>
+              <td>Рецидив рака молочной железы</td>
+            </tr>
+            <tr>
+              <td>PBC</td>
+              <td>418</td>
+              <td>17</td>
+              <td>5</td>
+              <td><code>time</code>, <code>status</code></td>
+              <td>
+                <span class="eda-censor-value">61,48%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 61.48%"></span></span>
+              </td>
+              <td>1033</td>
+              <td>Смерть</td>
+            </tr>
+            <tr>
+              <td>Rott2</td>
+              <td>2982</td>
+              <td>11</td>
+              <td>6</td>
+              <td><code>time</code>, <code>event</code></td>
+              <td>
+                <span class="eda-censor-value">57,34%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 57.34%"></span></span>
+              </td>
+              <td>0</td>
+              <td>Смерть</td>
+            </tr>
+            <tr>
+              <td>Smarto</td>
+              <td>3873</td>
+              <td>26</td>
+              <td>9</td>
+              <td><code>TEVENT</code>, <code>EVENT</code></td>
+              <td>
+                <span class="eda-censor-value">88,12%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 88.12%"></span></span>
+              </td>
+              <td>6357</td>
+              <td>Сердечно-сосудистое заболевание</td>
+            </tr>
+            <tr>
+              <td>Framingham</td>
+              <td>4699</td>
+              <td>7</td>
+              <td>2</td>
+              <td><code>followup</code>, <code>chdfate</code></td>
+              <td>
+                <span class="eda-censor-value">68,35%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 68.35%"></span></span>
+              </td>
+              <td>42</td>
+              <td>Ишемическая болезнь сердца</td>
+            </tr>
+            <tr>
+              <td>Support2</td>
+              <td>9105</td>
+              <td>35</td>
+              <td>11</td>
+              <td><code>d.time</code>, <code>death</code></td>
+              <td>
+                <span class="eda-censor-value">31,89%</span>
+                <span class="eda-censor-track"><span class="eda-censor-fill" style="width: 31.89%"></span></span>
+              </td>
+              <td>34 726</td>
+              <td>Смерть</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="overview-table-block">
+      <h3>Выводы EDA</h3>
+      <div class="criteria-grid">
+        <div class="criteria-card">
+          <h3>Цензурирование</h3>
+          <p>
+            ACTG и Smarto имеют очень высокую долю цензурированных наблюдений, поэтому
+            особенно хорошо проверяют способность моделей работать с неполной информацией
+            о времени события.
+          </p>
+        </div>
+        <div class="criteria-card">
+          <h3>Пропуски</h3>
+          <p>
+            PBC, Smarto, Framingham и Support2 содержат пропущенные значения, поэтому
+            предобработка является обязательной частью пайплайна перед сравнением моделей.
+          </p>
+        </div>
+        <div class="criteria-card">
+          <h3>Размерность</h3>
+          <p>
+            Support2 является самым крупным и самым широким набором данных, а GBSG и PBC
+            проверяют устойчивость подхода на небольших выборках.
+          </p>
+        </div>
+        <div class="criteria-card">
+          <h3>Покрытие задач</h3>
+          <p>
+            Датасеты описывают разные медицинские терминальные события: смерть, рецидив
+            заболевания, СПИД, ишемическую болезнь сердца и сердечно-сосудистые события.
+          </p>
+        </div>
+      </div>
+    </div>
+  </article>
+
   <article class="overview-panel" data-panel="experiment" id="experiment">
     <span class="overview-kicker">Эксперимент</span>
     <h2>Экспериментальный сценарий</h2>
@@ -506,32 +689,6 @@
       </div>
     </div>
 
-    <div class="overview-table-block">
-      <h3>Наборы данных</h3>
-      <div class="overview-table-wrap">
-        <table class="overview-data-table dataset-table">
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>N наблюдений</th>
-              <th>N признаков</th>
-              <th>Целевые переменные</th>
-              <th>Процент цензурирования</th>
-              <th>Событие</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td>ACTG</td><td>1151</td><td>11</td><td>time, event</td><td>91,66%</td><td>СПИД</td></tr>
-            <tr><td>GBSG</td><td>686</td><td>8</td><td>rfst, cens</td><td>56,41%</td><td>рецидив рака молочной железы</td></tr>
-            <tr><td>PBC</td><td>418</td><td>17</td><td>time, status</td><td>61,48%</td><td>смерть</td></tr>
-            <tr><td>Rott2</td><td>2982</td><td>11</td><td>time, event</td><td>57,34%</td><td>смерть</td></tr>
-            <tr><td>Smarto</td><td>3873</td><td>26</td><td>TEVENT, EVENT</td><td>88,12%</td><td>сердечно-сосудистое заболевание</td></tr>
-            <tr><td>Framingham</td><td>4699</td><td>7</td><td>followup, chdfate</td><td>68,35%</td><td>ишемическая болезнь сердца</td></tr>
-            <tr><td>Support2</td><td>9105</td><td>35</td><td>d.time, death</td><td>31,89%</td><td>смерть</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </article>
 
   <article class="overview-panel" data-panel="results" id="results">

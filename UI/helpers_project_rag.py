@@ -36,7 +36,7 @@ KNOWLEDGE_GLOBS = [
 ]
 
 TEXT_SOURCE_PATHS = [
-    "README.txt",
+    "README.md",
     "rank.py",
     "wrapSA.py",
     "run_many_server.py",

@@ -21,7 +21,7 @@
 - `knowledge/ai_usage_evidence.md`
 - `knowledge/product_evidence.md`
 - `knowledge/project_faq.md`
-- `README.txt`
+- `README.md`
 - ключевые файлы кода: `UI/app.py`, `UI/helpers_ai_advice.py`, `rank.py`, `wrapSA.py`, `run_many_server.py`
 - итоговые таблицы из `UI/tables`, особенно `leaderboards_by_task.xlsx`
 
