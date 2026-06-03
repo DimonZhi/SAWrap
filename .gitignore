@@ -20,5 +20,9 @@ dist/
 results/
 rag_index/
 UI/rag_index/
+UI/user_datasets/
+UI/model_store/
+UI/tables/custom_*.xlsx
+UI/tables/Piecewise_custom_*.xlsx
 
 *.log

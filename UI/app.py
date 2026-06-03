@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import List, Optional
 import json
 import os
+import shutil
 from fastapi import Form
 from sklearn.model_selection import train_test_split
 from pathlib import Path
@@ -12,10 +13,30 @@ from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 import survivors.datasets as ds
 import survivors.constants as cnt
 from .helpers_ai_advice import AI_TASKS, build_ai_advice
+from .helpers_demo_predict import (
+    MODEL_STORE_DIR,
+    build_demo_input_context,
+    build_demo_prediction,
+)
 from .helpers_project_rag import build_project_rag_answer
-from .helpers_tables import list_surv_metrics_from_table, get_surv_metrics, select_best_piecewise_variant
+from .helpers_tables import (
+    get_surv_metrics,
+    get_piecewise_table_path,
+    get_surv_table_path,
+    list_surv_metrics_from_table,
+    select_best_piecewise_variant,
+    select_global_piecewise_time,
+)
 from .helpers_leaderboard import load_leaderboard_images, load_overall_leaderboard_rows
 from .helpers_piecewise import load_piecewise_classification_summary
+from .helpers_user_datasets import (
+    DatasetUploadError,
+    delete_user_dataset,
+    is_user_dataset,
+    list_user_dataset_options,
+    load_user_dataset,
+    save_uploaded_dataset,
+)
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -168,6 +189,7 @@ PIECEWISE_OPTIONS = [
     },
 ]
 PIECEWISE_DEFAULT_BASE = "DecisionTreeClassifier"
+PIECEWISE_RUNTIME_DEFAULT_TIMES = 8
 
 
 def _valid_piecewise_bases(model_names: Optional[List[str]]) -> list[str]:
@@ -188,6 +210,12 @@ def build_piecewise_model_cfgs(
     }
 
     cfgs = []
+    classification_cfgs_by_label = {
+        model["label"]: model
+        for model in MODELS
+        if model.get("task") == "classification"
+    }
+    allow_runtime_piecewise = (not DISABLE_MISSING_RECALC) and is_user_dataset(base_dir, dataset_id)
     for option in PIECEWISE_OPTIONS:
         family = option["family"]
         for base_model in base_by_family[family]:
@@ -198,6 +226,28 @@ def build_piecewise_model_cfgs(
                 base_model=base_model,
                 task_id=task_id,
             )
+            if not label and allow_runtime_piecewise:
+                base_cfg = classification_cfgs_by_label.get(base_model)
+                if not base_cfg:
+                    continue
+                times = (
+                    select_global_piecewise_time(base_dir, family, base_model, task_id)
+                    or PIECEWISE_RUNTIME_DEFAULT_TIMES
+                )
+                label = f"{family}({base_model}, times={times})"
+                cfgs.append(
+                    {
+                        "id": base_cfg["id"],
+                        "label": label,
+                        "lib": base_cfg["lib"],
+                        "task": "classification",
+                        "param_grid": base_cfg.get("param_grid") or {},
+                        "piecewise_family": family,
+                        "base_model": base_model,
+                        "times": int(times),
+                    }
+                )
+                continue
             if not label:
                 continue
             cfgs.append(
@@ -237,16 +287,20 @@ def home_context(request: Request, **overrides):
     context = {
         "request": request,
         "messages": [],
-        "datasets": DATASETS,
+        "datasets": DATASETS + list_user_dataset_options(BASE_DIR),
         "presets": PRESETS,
         "models": MODELS,
         "piecewise_options": PIECEWISE_OPTIONS,
         "piecewise_base_models": PIECEWISE_BASE_MODELS,
         "piecewise_default_base": PIECEWISE_DEFAULT_BASE,
+        "allow_dataset_upload": not DISABLE_MISSING_RECALC,
         "selected": None,
         "plot_data": None,
         "plot_json": None,
         "metrics_list": [],
+        "show_demo": False,
+        "demo_context": None,
+        "demo_result": None,
         "ai_tasks": AI_TASKS,
         "ai_selected": {
             "dataset_id": DATASETS[0]["id"],
@@ -255,7 +309,77 @@ def home_context(request: Request, **overrides):
         "ai_advice": None,
     }
     context.update(overrides)
+    selected_ctx = context.get("selected")
+    if selected_ctx:
+        context["show_demo"] = is_user_dataset(BASE_DIR, selected_ctx.get("dataset_id"))
+    if context.get("demo_context") is None and selected_ctx:
+        context["demo_context"] = demo_context_for_dataset(selected_ctx.get("dataset_id"))
     return context
+
+
+def default_selected(dataset_id: str | None = None, preset_id: str | None = None):
+    preset = next((p for p in PRESETS if p["id"] == preset_id), None) or PRESETS[0]
+    return {
+        "dataset_id": dataset_id or DATASETS[0]["id"],
+        "preset_id": preset["id"],
+        "model_ids": [],
+        "piecewise_plain_bases": [],
+        "piecewise_censor_bases": [],
+        "x_metric": preset["x_metric"],
+        "y_metric": preset["y_metric"],
+    }
+
+
+def load_dataset_for_recompute(dataset_id: str):
+    if is_user_dataset(BASE_DIR, dataset_id):
+        return load_user_dataset(BASE_DIR, dataset_id)
+    load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
+    if load_fn is None:
+        return None
+    return load_fn()
+
+
+def delete_dataset_result_files(dataset_id: str) -> list[str]:
+    tables_dir = BASE_DIR / "tables"
+    candidates = {
+        get_surv_table_path(BASE_DIR, dataset_id),
+        get_piecewise_table_path(BASE_DIR, dataset_id),
+        tables_dir / f"{dataset_id}.xlsx",
+        tables_dir / f"{str(dataset_id).lower()}.xlsx",
+        tables_dir / f"{str(dataset_id).upper()}.xlsx",
+        tables_dir / f"Piecewise_{dataset_id}.xlsx",
+        BASE_DIR / f"Piecewise_{dataset_id}.xlsx",
+    }
+
+    removed = []
+    for path in sorted(candidates, key=lambda item: str(item)):
+        if path.exists() and path.is_file():
+            path.unlink()
+            removed.append(path.name)
+    return removed
+
+
+def delete_dataset_model_store(dataset_id: str) -> bool:
+    model_dir = BASE_DIR / MODEL_STORE_DIR / str(dataset_id).strip()
+    if not model_dir.exists():
+        return False
+    shutil.rmtree(model_dir)
+    return True
+
+
+def demo_context_for_dataset(dataset_id: str | None):
+    if not dataset_id:
+        return None
+    if not is_user_dataset(BASE_DIR, dataset_id):
+        return None
+    try:
+        loaded_dataset = load_dataset_for_recompute(dataset_id)
+        if loaded_dataset is None:
+            return None
+        X, y, features, categ, sch_nan = loaded_dataset
+    except Exception:
+        return None
+    return build_demo_input_context(dataset_id, X)
 
 
 @app.get("/", name="home")
@@ -264,6 +388,132 @@ async def home(request: Request):
         request,
         "home.html",
         home_context(request),
+    )
+
+
+@app.post("/datasets", name="upload_dataset")
+async def upload_dataset(
+    request: Request,
+    dataset_file: UploadFile = File(...),
+    dataset_id: str = Form(DATASETS[0]["id"]),
+    preset_id: str = Form(PRESETS[0]["id"]),
+):
+    selected = default_selected(dataset_id=dataset_id, preset_id=preset_id)
+    if DISABLE_MISSING_RECALC:
+        return templates.TemplateResponse(
+            request,
+            "home.html",
+            home_context(
+                request,
+                selected=selected,
+                messages=[
+                    {
+                        "category": "error",
+                        "text": "Добавление датасета доступно только при SAWRAP_SKIP_MISSING_RECALC=0.",
+                    }
+                ],
+            ),
+        )
+
+    content = await dataset_file.read()
+    try:
+        manifest = save_uploaded_dataset(BASE_DIR, dataset_file.filename or "dataset.csv", content)
+    except DatasetUploadError as exc:
+        return templates.TemplateResponse(
+            request,
+            "home.html",
+            home_context(
+                request,
+                selected=selected,
+                messages=[{"category": "error", "text": f"Датасет не добавлен: {exc}"}],
+            ),
+        )
+
+    selected = default_selected(dataset_id=manifest["id"], preset_id=preset_id)
+    detail = f"{manifest['rows']} строк, {manifest['feature_count']} признаков"
+    if manifest.get("dropped_rows"):
+        detail += f", удалено строк при очистке: {manifest['dropped_rows']}"
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        home_context(
+            request,
+            selected=selected,
+            messages=[
+                {
+                    "category": "success",
+                    "text": f"Датасет «{manifest['label']}» добавлен и приведен к стандартному виду: {detail}.",
+                }
+            ],
+        ),
+    )
+
+
+@app.post("/datasets/delete", name="delete_dataset")
+async def delete_dataset(
+    request: Request,
+    dataset_id: str = Form(...),
+    preset_id: str = Form(PRESETS[0]["id"]),
+):
+    selected = default_selected(preset_id=preset_id)
+    user_datasets = list_user_dataset_options(BASE_DIR)
+    dataset_label = next(
+        (dataset["label"] for dataset in user_datasets if dataset["id"] == dataset_id),
+        dataset_id,
+    )
+
+    if not is_user_dataset(BASE_DIR, dataset_id):
+        return templates.TemplateResponse(
+            request,
+            "home.html",
+            home_context(
+                request,
+                selected=default_selected(dataset_id=dataset_id, preset_id=preset_id),
+                demo_context=False,
+                messages=[
+                    {
+                        "category": "error",
+                        "text": "Удалять можно только пользовательские датасеты.",
+                    }
+                ],
+            ),
+        )
+
+    try:
+        delete_user_dataset(BASE_DIR, dataset_id)
+        removed_results = delete_dataset_result_files(dataset_id)
+        removed_models = delete_dataset_model_store(dataset_id)
+    except FileNotFoundError as exc:
+        return templates.TemplateResponse(
+            request,
+            "home.html",
+            home_context(
+                request,
+                selected=selected,
+                demo_context=False,
+                messages=[{"category": "error", "text": str(exc)}],
+            ),
+        )
+
+    details = ""
+    if removed_results:
+        details = f" Удалены результаты: {', '.join(removed_results)}."
+    if removed_models:
+        details += " Удалены сохраненные демо-модели."
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        home_context(
+            request,
+            selected=selected,
+            demo_context=False,
+            messages=[
+                {
+                    "category": "success",
+                    "text": f"Датасет «{dataset_label}» удален вместе с сохраненными результатами.{details}",
+                }
+            ],
+        ),
     )
 
 
@@ -325,6 +575,52 @@ async def project_rag_chat(request: Request):
     )
 
 
+@app.post("/demo-predict", name="demo_predict")
+async def demo_predict(request: Request):
+    form = await request.form()
+    dataset_id = str(form.get("dataset_id", "")).strip()
+    preset_id = str(form.get("preset_id", PRESETS[0]["id"])).strip() or PRESETS[0]["id"]
+    feature_values = {
+        str(key)[len("feature__") :]: str(value)
+        for key, value in form.multi_items()
+        if str(key).startswith("feature__")
+    }
+    selected = default_selected(dataset_id=dataset_id, preset_id=preset_id)
+
+    if not is_user_dataset(BASE_DIR, dataset_id):
+        result = {
+            "ok": False,
+            "error": "Демо-прогноз доступен только для загруженных пользовательских датасетов.",
+        }
+    else:
+        result = build_demo_prediction(
+            base_dir=BASE_DIR,
+            dataset_id=dataset_id,
+            raw_values=feature_values,
+            model_cfgs=MODELS,
+            load_dataset=load_dataset_for_recompute,
+        )
+
+    wants_json = "application/json" in str(request.headers.get("accept", "")).lower()
+    if wants_json or str(form.get("_ajax", "")).strip() == "1":
+        return JSONResponse(result)
+
+    messages = []
+    if not result.get("ok"):
+        messages.append({"category": "error", "text": result.get("error") or "Демо-прогноз не построен."})
+
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        home_context(
+            request,
+            selected=selected,
+            demo_result=result,
+            messages=messages,
+        ),
+    )
+
+
 @app.post("/compare", name="compare_models")
 async def compare_models(
     request: Request,
@@ -383,14 +679,14 @@ async def compare_models(
     X = y = None
 
     if can_recompute_selected:
-        load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
-        if load_fn is None:
+        loaded_dataset = load_dataset_for_recompute(dataset_id)
+        if loaded_dataset is None:
             return templates.TemplateResponse(request, "home.html", home_context(
                 request,
                 selected=selected,
                 messages=[{"category":"error","text":f"Нет загрузчика датасета: load_{dataset_id}_dataset()"}],
             ))
-        X, y, features, categ, sch_nan = load_fn()
+        X, y, features, categ, sch_nan = loaded_dataset
 
     errors = []
     metrics_list = []

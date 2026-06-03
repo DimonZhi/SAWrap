@@ -1,13 +1,19 @@
 import re
+import os
 
 import pandas as pd
 from pathlib import Path
 import numpy as np
 import importlib
+
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
 from survivors.experiments import grid as exp
 from survivors.external import SAWrapSA, ClassifWrapSA, RegrWrapSA
 from sklearn.metrics import root_mean_squared_error, r2_score, roc_auc_score, log_loss
+from sklearn.model_selection import train_test_split
 from .helpers_ai_advice import TASK_CONFIGS, _score_models
+from .helpers_runtime_piecewise import PIECEWISE_RUNTIME_CLASSES
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -134,6 +140,8 @@ def select_best_piecewise_variant(
 
 def import_class(path: str):
     module_name, class_name = path.rsplit(".", 1)
+    if module_name.startswith("survivors."):
+        os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
 
@@ -206,6 +214,111 @@ def _ensure_cols(df: pd.DataFrame, cols: list):
             df[c] = pd.NA
     return df
 
+
+def _copy_surv_y(y):
+    if isinstance(y, np.ndarray):
+        return y.copy()
+    if isinstance(y, pd.DataFrame):
+        return y.copy(deep=True)
+    if isinstance(y, dict):
+        return {key: np.asarray(value).copy() for key, value in y.items()}
+    return y
+
+
+def _is_sparse_stratify_error(exc: ValueError) -> bool:
+    text = str(exc)
+    return (
+        "least populated classes" in text
+        or "minimum number of groups for any class" in text
+    )
+
+
+def _run_effective_without_holdout_stratify(experim, X, y, verbose=0, stratify_best=None):
+    stratify_best = stratify_best or []
+    if experim.mode != "CV+SAMPLE":
+        experim.run(X, y, dir_path=None, verbose=verbose)
+        return None
+
+    y_run = _copy_surv_y(y)
+    y_run["time"] = exp.bins_scheme(y_run["time"], scheme=experim.bins_sch)
+    experim.bins_sch = ""
+
+    folds = 20
+    X_TR, X_HO = train_test_split(
+        X,
+        stratify=None,
+        test_size=0.33,
+        random_state=42,
+    )
+    X_tr, y_tr, X_HO, y_HO, bins_HO = exp.prepare_sample(X, y_run, X_TR.index, X_HO.index)
+    old_mode = experim.mode
+    try:
+        experim.mode = "CV"
+        experim.run(X_tr, y_tr, dir_path=None, verbose=verbose)
+        try:
+            experim.sample_table = experim.eval_on_sample_by_best_params(
+                X,
+                y_run,
+                folds=folds,
+                stratify=stratify_best,
+            )
+        except ValueError as exc:
+            if not _is_sparse_stratify_error(exc):
+                raise
+            experim.sample_table = experim.get_cv_result(stratify=stratify_best)
+    finally:
+        experim.mode = old_mode
+    return None
+
+
+def _run_effective_with_fallback(experim, X, y, verbose=0, stratify_best=None):
+    bins_sch = getattr(experim, "bins_sch", "")
+    mode = getattr(experim, "mode", None)
+    try:
+        return experim.run_effective(
+            X,
+            _copy_surv_y(y),
+            verbose=verbose,
+            stratify_best=stratify_best or [],
+        )
+    except ValueError as exc:
+        if not _is_sparse_stratify_error(exc):
+            raise
+        experim.bins_sch = bins_sch
+        if mode is not None:
+            experim.mode = mode
+        return _run_effective_without_holdout_stratify(
+            experim,
+            X,
+            y,
+            verbose=verbose,
+            stratify_best=stratify_best or [],
+        )
+
+def _matching_model_cfgs_for_table(base_dir: Path, dataset_id: str, model_cfgs: list, table_path: Path) -> list:
+    target = Path(table_path).resolve()
+    return [
+        cfg
+        for cfg in (model_cfgs or [])
+        if get_metric_table_path(base_dir, dataset_id, cfg.get("label")).resolve() == target
+    ]
+
+
+def _build_method_obj(mcfg: dict):
+    Est = import_class(mcfg["id"])
+    est_obj = Est()
+    family = mcfg.get("piecewise_family")
+    if family:
+        Wrapper = PIECEWISE_RUNTIME_CLASSES[family]
+        return Wrapper(est_obj, times=int(mcfg.get("times") or 8))
+
+    t = mcfg.get("task")
+    if t == "survival":
+        return SAWrapSA(est_obj)
+    if t == "classification":
+        return ClassifWrapSA(est_obj)
+    return RegrWrapSA(est_obj)
+
 def find_sf_at_truetime(pred_sf, event_time, bins):
         idx_pred = np.clip(np.searchsorted(bins, event_time), 0, len(bins) - 1)
         proba = np.take_along_axis(pred_sf, idx_pred[:, np.newaxis], axis=1).squeeze()
@@ -218,8 +331,10 @@ def supplement_surv_table_missing(
     y_tr,
     model_cfgs: list,
     need_metrics: list,
+    table_path: Path | None = None,
 ):
-    table_path = get_surv_table_path(base_dir, dataset_id)
+    table_path = Path(table_path) if table_path is not None else get_surv_table_path(base_dir, dataset_id)
+    model_cfgs = _matching_model_cfgs_for_table(base_dir, dataset_id, model_cfgs, table_path)
     table_path.parent.mkdir(parents=True, exist_ok=True)
     #классификация
     auc_event      = lambda y_tr, y_tst, pred_time, pred_sf, pred_hf, bins: roc_auc_score(y_tst["cens"].astype(int), find_sf_at_truetime(pred_sf, y_tst["time"], bins))
@@ -240,7 +355,7 @@ def supplement_surv_table_missing(
         df = pd.DataFrame(columns=["method"])
         df = normalize_surv_df(df)
 
-    need_cols = ["method", "__method_norm__"] + [_norm(mk) + "_mean" for mk in need_metrics]
+    need_cols = ["method", "__method_norm__", "params"] + [_norm(mk) + "_mean" for mk in need_metrics]
     df = _ensure_cols(df, need_cols)
 
     cfg2missing = {}
@@ -300,23 +415,15 @@ def supplement_surv_table_missing(
             best_metric = _norm(best_metric).upper()
         experim.add_metric_best(best_metric)
 
-        Est = import_class(mcfg["id"])
         grid = mcfg.get("param_grid")
         if not grid:
             kwargs = mcfg.get("kwargs") or {}
             grid = {k: [v] for k, v in kwargs.items()}
 
-        est_obj = Est()
-        t = mcfg.get("task")
-        if t == "survival":
-            method_obj = SAWrapSA(est_obj)
-        elif t == "classification":
-            method_obj = ClassifWrapSA(est_obj)
-        else:
-            method_obj = RegrWrapSA(est_obj)
+        method_obj = _build_method_obj(mcfg)
         experim.add_method(method_obj, grid)
 
-        experim.run_effective(X_tr, y_tr, verbose=0, stratify_best=[])
+        _run_effective_with_fallback(experim, X_tr, y_tr, verbose=0, stratify_best=[])
 
         df_best = experim.get_best_by_mode()
         df_best = df_best.rename(columns={c: _norm(c) for c in df_best.columns})
@@ -325,6 +432,8 @@ def supplement_surv_table_missing(
             continue
         src = df_best.iloc[[0]]                                                         
 
+        if "params" in src.columns:
+            df.at[idx, "params"] = str(src.iloc[0].get("params"))
 
         for mk in miss:
             mean_col = _norm(mk) + "_mean"
@@ -364,8 +473,6 @@ def get_surv_metrics(
         need.append(x_metric)
     if vy is None and _norm(y_metric) != _norm(x_metric):
         need.append(y_metric)
-    if is_piecewise_model_label(model_label):
-        return vx, vy, table_path
     if (not allow_recompute) or (not need) or (X_tr is None) or (y_tr is None) or (not model_cfgs):
         return vx, vy, table_path
     supplement_surv_table_missing(
@@ -375,6 +482,7 @@ def get_surv_metrics(
         y_tr=y_tr,
         model_cfgs=model_cfgs,
         need_metrics=need,
+        table_path=table_path,
     )
 
     df = load_surv_df(table_path)

@@ -8,14 +8,14 @@
   <p class="page-subtitle">Выбери датасет и модели, которые есть в таблицах ACTG, GBSG, PBC, Rott2, Smarto, Framingham и Support2.</p>
 </div>
 
-<form action="{{ url_for('compare_models') }}" method="post" class="grid-2">
+<form action="{{ url_for('compare_models') }}" method="post" enctype="multipart/form-data" class="grid-2">
   <section class="card">
     <h2 style="margin-top:0;font-size:18px;">Данные и пресет метрик</h2>
 
     <label class="field-label">Датасет из таблиц</label>
-    <select name="dataset_id" class="input-field">
+    <select name="dataset_id" class="input-field" id="dataset-select">
       {% for ds in datasets %}
-        <option value="{{ ds.id }}"
+        <option value="{{ ds.id }}" data-custom="{{ 1 if ds.custom|default(false) else 0 }}"
           {% if selected and selected.dataset_id == ds.id %}selected{% endif %}>
           {{ ds.label }}
         </option>
@@ -31,6 +31,35 @@
         </option>
       {% endfor %}
     </select>
+
+    {% if allow_dataset_upload %}
+      <div class="dataset-upload">
+        <label class="field-label" for="dataset-file">Пользовательский датасет</label>
+        <input
+          id="dataset-file"
+          type="file"
+          name="dataset_file"
+          class="input-field dataset-file-input"
+          accept=".csv,.xlsx,.xlsm"
+        >
+        <button
+          type="submit"
+          class="btn dataset-upload-btn"
+          formaction="{{ url_for('upload_dataset') }}"
+          formmethod="post"
+          formenctype="multipart/form-data"
+        >Добавить датасет</button>
+        <button
+          type="submit"
+          class="btn btn-danger dataset-delete-btn"
+          formaction="{{ url_for('delete_dataset') }}"
+          formmethod="post"
+          hidden
+          disabled
+        >Удалить датасет</button>
+        <p class="hint dataset-upload-hint">CSV/XLSX с колонками времени и события.</p>
+      </div>
+    {% endif %}
   </section>
 
   <section class="card">
@@ -299,6 +328,67 @@
   <div id="metrics-plot" style="width:100%;height:460px;"></div>
 </section>
 
+{% if show_demo %}
+  <section class="card demo-card">
+    <div class="section-heading">
+      <div>
+        <h2>Демо-прогноз</h2>
+      </div>
+    </div>
+
+    {% if demo_context %}
+      <form action="{{ url_for('demo_predict') }}" method="post" class="demo-form" id="demo-predict-form">
+        <input type="hidden" name="dataset_id" value="{{ demo_context.dataset_id }}">
+        <input type="hidden" name="preset_id" value="{{ selected.preset_id if selected else presets[0].id }}">
+
+        <div class="demo-feature-grid">
+          {% for feature in demo_context.features %}
+            <label class="demo-feature">
+              <span>{{ feature.label }}</span>
+              <input
+                type="number"
+                step="any"
+                name="feature__{{ feature.name }}"
+                value="{{ '%.6g'|format(feature.value) }}"
+                class="input-field"
+              >
+            </label>
+          {% endfor %}
+        </div>
+
+        <button type="submit" class="btn btn-primary demo-submit">Построить демо-прогноз</button>
+      </form>
+    {% else %}
+      <p class="empty-state">Выбери пользовательский датасет и построй график.</p>
+    {% endif %}
+
+    <div id="demo-result-shell">
+      {% if demo_result %}
+        {% if demo_result.ok %}
+          <div class="demo-result">
+            <div id="demo-prediction-plot" class="demo-prediction-plot"></div>
+            <div class="demo-summary-grid">
+              {% for card in demo_result.cards %}
+                <div class="demo-summary-card">
+                  <span>{{ card.category_label }}</span>
+                  <strong>{{ card.method }}</strong>
+                  <div>Ожидаемое время: {{ card.expected_time }}</div>
+                  <div>Риск события: {{ card.risk }}</div>
+                </div>
+              {% endfor %}
+            </div>
+            {% if demo_result.errors %}
+              <p class="ai-note">{{ demo_result.errors | join(" | ") }}</p>
+            {% endif %}
+          </div>
+        {% else %}
+          <p class="empty-state">{{ demo_result.error }}</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </section>
+{% endif %}
+
 {% if messages %}
   <div class="card" style="margin-top:12px;">
     {% for m in messages %}
@@ -309,7 +399,7 @@
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
-function arrow(metricKey) {
+  function arrow(metricKey) {
   const higherBetter = new Set([
     "accuracy",
     "auc",
@@ -353,6 +443,29 @@ function arrow(metricKey) {
   return "";
 }
 (function () {
+  const datasetSelect = document.getElementById('dataset-select');
+  const datasetDeleteBtn = document.querySelector('.dataset-delete-btn');
+
+  function syncDatasetDeleteButton() {
+    if (!datasetSelect || !datasetDeleteBtn) return;
+    const selectedOption = datasetSelect.options[datasetSelect.selectedIndex];
+    const isCustom = selectedOption && selectedOption.dataset.custom === '1';
+    datasetDeleteBtn.hidden = !isCustom;
+    datasetDeleteBtn.disabled = !isCustom;
+  }
+
+  if (datasetSelect && datasetDeleteBtn) {
+    syncDatasetDeleteButton();
+    datasetSelect.addEventListener('change', syncDatasetDeleteButton);
+    datasetDeleteBtn.addEventListener('click', (event) => {
+      const selectedOption = datasetSelect.options[datasetSelect.selectedIndex];
+      const label = selectedOption ? selectedOption.textContent.trim() : 'датасет';
+      if (!window.confirm(`Удалить ${label} и все сохраненные результаты по нему?`)) {
+        event.preventDefault();
+      }
+    });
+  }
+
   // ---------- models dropdowns (работает всегда) ----------
   const dds = Array.from(document.querySelectorAll('.models-dropdown'));
 
@@ -442,6 +555,9 @@ function arrow(metricKey) {
   const ySelect = document.getElementById('plot-y-select');
   const plotData = {{ (plot_data  if plot_data else None) | tojson }};
   const metricsList = {{ (metrics_list or []) | tojson }};
+  let demoResult = {{ (demo_result if demo_result else None) | tojson }};
+  const demoForm = document.getElementById('demo-predict-form');
+  const demoResultShell = document.getElementById('demo-result-shell');
 
   const ragShell = document.getElementById('project-rag-shell');
   const ragForm = document.getElementById('project-rag-form');
@@ -614,7 +730,110 @@ function arrow(metricKey) {
     });
   }
 
-  if (!plotEl || !plotToolbar || !xSelect || !ySelect) return;
+  function renderDemoPrediction(result = demoResult) {
+    const demoPlotEl = document.getElementById('demo-prediction-plot');
+    if (!demoPlotEl || !result || !result.ok || !Array.isArray(result.traces)) return;
+    const traces = result.traces.map((trace) => ({
+      x: trace.x || [],
+      y: trace.y || [],
+      name: trace.name,
+      mode: 'lines',
+      line: {width: 3}
+    }));
+    const layout = {
+      margin: {l: 60, r: 20, t: 24, b: 56},
+      xaxis: {title: 'Время'},
+      yaxis: {title: 'S(t | x)', range: [0, 1.02]},
+      legend: {orientation: 'h', y: -0.25}
+    };
+    Plotly.newPlot(demoPlotEl, traces, layout, {responsive: true});
+  }
+
+  function renderDemoResult(result) {
+    demoResult = result;
+    if (!demoResultShell) return;
+
+    if (!result) {
+      demoResultShell.innerHTML = '';
+      return;
+    }
+
+    if (!result.ok) {
+      demoResultShell.innerHTML = `<p class="empty-state">${escapeHtml(result.error || 'Демо-прогноз не построен.')}</p>`;
+      return;
+    }
+
+    const cards = Array.isArray(result.cards) ? result.cards : [];
+    const cardsHtml = cards.map((card) => `
+      <div class="demo-summary-card">
+        <span>${escapeHtml(card.category_label)}</span>
+        <strong>${escapeHtml(card.method)}</strong>
+        <div>Ожидаемое время: ${escapeHtml(card.expected_time)}</div>
+        <div>Риск события: ${escapeHtml(card.risk)}</div>
+      </div>
+    `).join('');
+    const errors = Array.isArray(result.errors) ? result.errors.filter(Boolean) : [];
+    const errorsHtml = errors.length
+      ? `<p class="ai-note">${escapeHtml(errors.join(' | '))}</p>`
+      : '';
+
+    demoResultShell.innerHTML = `
+      <div class="demo-result">
+        <div id="demo-prediction-plot" class="demo-prediction-plot"></div>
+        <div class="demo-summary-grid">${cardsHtml}</div>
+        ${errorsHtml}
+      </div>
+    `;
+    renderDemoPrediction(result);
+  }
+
+  if (demoForm) {
+    demoForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const submitButton = demoForm.querySelector('button[type="submit"]');
+      const originalText = submitButton ? submitButton.textContent : '';
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Строю прогноз...';
+      }
+      if (demoResultShell) {
+        demoResultShell.innerHTML = '<p class="empty-state">Строю демо-прогноз...</p>';
+      }
+
+      try {
+        const formData = new FormData(demoForm);
+        formData.set('_ajax', '1');
+        const response = await fetch(demoForm.action, {
+          method: demoForm.method || 'POST',
+          headers: {'Accept': 'application/json'},
+          body: formData,
+        });
+        const payload = await response.json();
+        if (!response.ok && !payload.error) {
+          payload.error = 'Демо-прогноз не построен.';
+        }
+        renderDemoResult(payload);
+      } catch (error) {
+        renderDemoResult({
+          ok: false,
+          error: `Ошибка запроса: ${error}`,
+        });
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = originalText;
+        }
+      }
+    });
+  }
+
+  if (!plotEl || !plotToolbar || !xSelect || !ySelect) {
+    renderDemoPrediction();
+    return;
+  }
+
+  renderDemoPrediction();
 
   if (!plotData) {
     plotToolbar.style.display = 'none';
