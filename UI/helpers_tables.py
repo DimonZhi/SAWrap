@@ -423,7 +423,7 @@ def supplement_surv_table_missing(
         method_obj = _build_method_obj(mcfg)
         experim.add_method(method_obj, grid)
 
-        _run_effective_with_fallback(experim, X_tr, y_tr, verbose=0, stratify_best=[])
+        _run_effective_with_fallback(experim, X_tr, y_tr, verbose=1, stratify_best=[])
 
         df_best = experim.get_best_by_mode()
         df_best = df_best.rename(columns={c: _norm(c) for c in df_best.columns})

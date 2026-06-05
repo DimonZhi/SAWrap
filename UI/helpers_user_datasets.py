@@ -2,6 +2,7 @@ import io
 import json
 import re
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,14 @@ import pandas as pd
 USER_DATASETS_DIR = "user_datasets"
 DATA_FILE = "data.csv"
 MANIFEST_FILE = "manifest.json"
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_UPLOAD_BYTES = 128 * 1024 * 1024
+HIGH_MISSING_FEATURE_THRESHOLD = 0.99
+HIGH_CARDINALITY_TEXT_UNIQUE_RATIO = 0.9
+HIGH_CARDINALITY_TEXT_MIN_UNIQUE = 50
 
-TIME_ALIASES = {
+TIME_ALIASES = (
     "time",
+    "event_time",
     "duration",
     "dtime",
     "rfst",
@@ -25,8 +30,10 @@ TIME_ALIASES = {
     "days",
     "days_to_event",
     "tte",
-}
-EVENT_ALIASES = {
+    "tenure",
+    "tenure_months",
+)
+EVENT_ALIASES = (
     "cens",
     "event",
     "status",
@@ -37,6 +44,17 @@ EVENT_ALIASES = {
     "event_observed",
     "censor",
     "censored",
+    "churn",
+    "churn_value",
+)
+METADATA_COLUMN_KEYS = {
+    "customerid",
+    "date",
+    "id",
+    "latlong",
+    "serialnumber",
+    "timerow",
+    "unnamed0",
 }
 TRUE_TOKENS = {
     "1",
@@ -122,7 +140,7 @@ def _unique_columns(columns: list[str]) -> list[str]:
     return unique
 
 
-def _find_column(columns: list[str], aliases: set[str], kind: str) -> str | None:
+def _find_column(columns: list[str], aliases, kind: str) -> str | None:
     by_key = {_key(col): col for col in columns}
     for alias in aliases:
         hit = by_key.get(_key(alias))
@@ -140,13 +158,19 @@ def _find_column(columns: list[str], aliases: set[str], kind: str) -> str | None
 
 def _read_table(filename: str, content: bytes) -> pd.DataFrame:
     if len(content) > MAX_UPLOAD_BYTES:
-        raise DatasetUploadError("Файл слишком большой: максимум 25 МБ.")
+        max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise DatasetUploadError(f"Файл слишком большой: максимум {max_mb} МБ.")
 
-    suffix = Path(filename or "").suffix.lower()
+    suffixes = [suffix.lower() for suffix in Path(filename or "").suffixes]
+    suffix = suffixes[-1] if suffixes else ""
     buffer = io.BytesIO(content)
     try:
-        if suffix in {".xlsx", ".xlsm"}:
+        if suffix in {".xlsx", ".xlsm", ".xls"}:
             return pd.read_excel(buffer)
+        if suffix == ".zip":
+            return _read_zip_csv(buffer)
+        if suffix == ".gz" and ".csv" in suffixes:
+            return pd.read_csv(buffer, compression="gzip")
         if suffix == ".csv" or not suffix:
             try:
                 return pd.read_csv(buffer, sep=None, engine="python")
@@ -156,7 +180,38 @@ def _read_table(filename: str, content: bytes) -> pd.DataFrame:
     except Exception as exc:
         raise DatasetUploadError(f"Не удалось прочитать файл: {exc}") from exc
 
-    raise DatasetUploadError("Поддерживаются CSV и XLSX.")
+    raise DatasetUploadError("Поддерживаются CSV, CSV.GZ, ZIP с CSV и XLSX.")
+
+
+def _read_zip_csv(buffer: io.BytesIO) -> pd.DataFrame:
+    try:
+        with zipfile.ZipFile(buffer) as archive:
+            csv_names = [
+                name
+                for name in archive.namelist()
+                if not name.endswith("/") and Path(name).suffix.lower() == ".csv"
+            ]
+            if not csv_names:
+                raise DatasetUploadError("В ZIP не найден CSV-файл.")
+            with archive.open(csv_names[0]) as csv_file:
+                return pd.read_csv(csv_file)
+    except DatasetUploadError:
+        raise
+    except Exception as exc:
+        raise DatasetUploadError(f"Не удалось прочитать ZIP: {exc}") from exc
+
+
+def _coerce_time(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    non_missing = series.notna()
+    if numeric[non_missing].notna().all():
+        return numeric
+
+    timedeltas = pd.to_timedelta(series, errors="coerce")
+    if timedeltas[non_missing].notna().any():
+        return timedeltas.dt.total_seconds() / 86400.0
+
+    return numeric
 
 
 def _coerce_event(series: pd.Series) -> pd.Series:
@@ -180,6 +235,45 @@ def _coerce_event(series: pd.Series) -> pd.Series:
             number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
             values.append(1 if pd.notna(number) and float(number) > 0 else np.nan)
     return pd.Series(values, index=series.index)
+
+
+def _is_high_cardinality_text(series: pd.Series) -> bool:
+    numeric = pd.to_numeric(series, errors="coerce")
+    non_missing_count = int(series.notna().sum())
+    if non_missing_count == 0:
+        return False
+    numeric_count = int(numeric.notna().sum())
+    if numeric_count / non_missing_count >= 0.9:
+        return False
+    unique_count = int(series.dropna().astype(str).nunique())
+    return (
+        unique_count >= HIGH_CARDINALITY_TEXT_MIN_UNIQUE
+        and unique_count / non_missing_count >= HIGH_CARDINALITY_TEXT_UNIQUE_RATIO
+    )
+
+
+def _select_feature_columns(
+    df: pd.DataFrame,
+    excluded_columns: set[str],
+) -> tuple[list[str], list[str]]:
+    feature_columns = []
+    dropped_features = []
+    for column in df.columns:
+        if column in excluded_columns:
+            continue
+        key = _key(column)
+        series = df[column]
+        if key in METADATA_COLUMN_KEYS or key.startswith("unnamed"):
+            dropped_features.append(column)
+            continue
+        if float(series.isna().mean()) >= HIGH_MISSING_FEATURE_THRESHOLD:
+            dropped_features.append(column)
+            continue
+        if _is_high_cardinality_text(series):
+            dropped_features.append(column)
+            continue
+        feature_columns.append(column)
+    return feature_columns, dropped_features
 
 
 def _prepare_features(df: pd.DataFrame, feature_columns: list[str]) -> tuple[pd.DataFrame, list[str], list[str]]:
@@ -225,7 +319,7 @@ def standardize_uploaded_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     if time_col == event_col:
         raise DatasetUploadError("Колонки времени и события должны быть разными.")
 
-    time = pd.to_numeric(df[time_col], errors="coerce")
+    time = _coerce_time(df[time_col])
     event = _coerce_event(df[event_col])
     valid_mask = time.notna() & event.notna() & np.isfinite(time) & (time >= 0)
     dropped_rows = int((~valid_mask).sum())
@@ -235,12 +329,14 @@ def standardize_uploaded_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     clean_df = df.loc[valid_mask].reset_index(drop=True)
     clean_time = time.loc[valid_mask].reset_index(drop=True).astype(float)
     clean_event = event.loc[valid_mask].reset_index(drop=True).astype(int)
+    if clean_time.min() == 0:
+        clean_time = clean_time + 1.0
     if clean_time.nunique() < 2:
         raise DatasetUploadError("Колонка времени должна содержать хотя бы два разных значения.")
     if clean_event.nunique() < 2:
         raise DatasetUploadError("В колонке события нужны оба класса: 0 для цензуры и 1 для события.")
 
-    feature_columns = [col for col in clean_df.columns if col not in {time_col, event_col}]
+    feature_columns, dropped_features = _select_feature_columns(clean_df, {time_col, event_col})
     X, feature_names, categorical_features = _prepare_features(clean_df, feature_columns)
     standard = pd.concat(
         [
@@ -257,6 +353,8 @@ def standardize_uploaded_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         "time_column": time_col,
         "event_column": event_col,
         "dropped_rows": dropped_rows,
+        "dropped_feature_count": int(len(dropped_features)),
+        "dropped_features_sample": [str(name) for name in dropped_features[:20]],
     }
     return standard, manifest
 

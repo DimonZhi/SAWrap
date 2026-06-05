@@ -23,9 +23,9 @@
     </select>
 
     <label class="field-label" style="margin-top:10px;">Пресет из двух метрик</label>
-    <select name="preset_id" class="input-field">
+    <select name="preset_id" class="input-field" id="preset-select">
       {% for p in presets %}
-        <option value="{{ p.id }}"
+        <option value="{{ p.id }}" data-task="{{ p.preset_task }}"
           {% if selected and selected.preset_id == p.id %}selected{% endif %}>
           {{ p.label }}
         </option>
@@ -40,7 +40,7 @@
           type="file"
           name="dataset_file"
           class="input-field dataset-file-input"
-          accept=".csv,.xlsx,.xlsm"
+          accept=".csv,.csv.gz,.gz,.zip,.xlsx,.xls,.xlsm"
         >
         <button
           type="submit"
@@ -57,7 +57,7 @@
           hidden
           disabled
         >Удалить датасет</button>
-        <p class="hint dataset-upload-hint">CSV/XLSX с колонками времени и события.</p>
+        <p class="hint dataset-upload-hint">CSV/CSV.GZ/ZIP/XLSX с колонками времени и события.</p>
       </div>
     {% endif %}
   </section>
@@ -172,7 +172,7 @@
   <form action="{{ url_for('ai_advice') }}" method="post" class="ai-form">
     <label class="plot-control">
       <span>Датасет</span>
-      <select name="ai_dataset_id" class="input-field">
+      <select name="ai_dataset_id" class="input-field" id="ai-dataset-select">
         {% for ds in datasets %}
           <option value="{{ ds.id }}"
             {% if ai_selected and ai_selected.dataset_id == ds.id %}selected{% endif %}>
@@ -184,7 +184,7 @@
 
     <label class="plot-control">
       <span>Задача</span>
-      <select name="ai_task_id" class="input-field">
+      <select name="ai_task_id" class="input-field" id="ai-task-select">
         {% for task in ai_tasks %}
           <option value="{{ task.id }}"
             {% if ai_selected and ai_selected.task_id == task.id %}selected{% endif %}>
@@ -444,7 +444,33 @@
 }
 (function () {
   const datasetSelect = document.getElementById('dataset-select');
+  const presetSelect = document.getElementById('preset-select');
+  const aiDatasetSelect = document.getElementById('ai-dataset-select');
+  const aiTaskSelect = document.getElementById('ai-task-select');
   const datasetDeleteBtn = document.querySelector('.dataset-delete-btn');
+
+  function syncAiPickerFromCompare() {
+    if (datasetSelect && aiDatasetSelect) {
+      aiDatasetSelect.value = datasetSelect.value;
+    }
+    if (presetSelect && aiTaskSelect) {
+      const selectedPreset = presetSelect.options[presetSelect.selectedIndex];
+      const taskId = selectedPreset ? selectedPreset.dataset.task : '';
+      if (taskId) {
+        aiTaskSelect.value = taskId;
+      }
+    }
+  }
+
+  if (datasetSelect || presetSelect) {
+    syncAiPickerFromCompare();
+    if (datasetSelect) {
+      datasetSelect.addEventListener('change', syncAiPickerFromCompare);
+    }
+    if (presetSelect) {
+      presetSelect.addEventListener('change', syncAiPickerFromCompare);
+    }
+  }
 
   function syncDatasetDeleteButton() {
     if (!datasetSelect || !datasetDeleteBtn) return;

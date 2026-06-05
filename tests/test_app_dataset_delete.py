@@ -1,3 +1,4 @@
+import gzip
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -53,3 +54,30 @@ def test_delete_dataset_rejects_builtin_dataset(tmp_path: Path, monkeypatch):
 
     assert response.status_code == 200
     assert "Удалять можно только пользовательские датасеты" in response.text
+
+
+def test_upload_dataset_accepts_exp_csv_gz(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(app_module, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(app_module, "DISABLE_MISSING_RECALC", False)
+    content = gzip.compress(
+        (
+            "serial_number,manufacturer,model,smart_1_raw,event,event_time\n"
+            "disk_1,A,2,10,False,471\n"
+            "disk_2,A,2,20,True,202\n"
+            "disk_3,B,3,30,False,203\n"
+            "disk_4,B,3,40,True,204\n"
+            "disk_5,C,4,50,False,205\n"
+            "disk_6,C,4,60,True,206\n"
+        ).encode()
+    )
+
+    client = TestClient(app_module.app, raise_server_exceptions=False)
+    response = client.post(
+        "/datasets",
+        data={"dataset_id": "actg", "preset_id": "cls_auc_logloss"},
+        files={"dataset_file": ("Cut_Alibaba.csv.gz", content, "application/gzip")},
+    )
+
+    assert response.status_code == 200
+    assert "добавлен и приведен к стандартному виду" in response.text
+    assert (tmp_path / "user_datasets" / "custom_cut_alibaba_csv" / "data.csv").exists()

@@ -20,6 +20,7 @@ except ImportError:
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini"
+_LOCAL_ENV_LOADED = False
 PIECEWISE_RE = re.compile(
     r"^(Piecewise(?:CensorAware)?ClassifWrapSA)\(([^,]+),\s*times=(\d+)\)$"
 )
@@ -64,9 +65,50 @@ TASK_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
-
 def _norm(value: Any) -> str:
     return str(value).strip().lower()
+
+
+def _load_local_env_once() -> None:
+    global _LOCAL_ENV_LOADED
+    if _LOCAL_ENV_LOADED:
+        return
+    _LOCAL_ENV_LOADED = True
+
+    env_paths = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parents[1] / ".env",
+    ]
+    for env_path in env_paths:
+        if not env_path.exists():
+            continue
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            if stripped.startswith("export "):
+                stripped = stripped[len("export ") :].strip()
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                continue
+            value = value.strip()
+            if (
+                len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in {"'", '"'}
+            ):
+                value = value[1:-1]
+            os.environ.setdefault(key, value)
+
+
+def _env_value(name: str, default: str | None = None) -> str | None:
+    _load_local_env_once()
+    return os.getenv(name, default)
 
 
 def _metric_col(metric_key: str) -> str:
@@ -87,6 +129,20 @@ def _find_table_path(base_dir: Path, dataset_id: str) -> Path:
 
 def _piecewise_match(method_name: Any):
     return PIECEWISE_RE.match(str(method_name).strip())
+
+
+def _filter_rows_with_metrics(df: pd.DataFrame, metrics: list[dict[str, Any]]) -> pd.DataFrame:
+    if df.empty:
+        return df
+    has_metric = pd.Series(False, index=df.index)
+    for metric in metrics:
+        col = _metric_col(metric["key"])
+        if col not in df.columns:
+            continue
+        has_metric = has_metric | pd.to_numeric(df[col], errors="coerce").notna()
+    if has_metric.any():
+        return df.loc[has_metric].copy()
+    return df
 
 
 def _piecewise_rows_for_advice(
@@ -437,8 +493,8 @@ def _call_openrouter(
     timeout: float = 20.0,
     opener=urlopen,
 ) -> dict[str, Any]:
-    selected_model = model or os.getenv("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL
-    key = api_key or os.getenv("OPENROUTER_API_KEY")
+    selected_model = model or _env_value("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL
+    key = api_key or _env_value("OPENROUTER_API_KEY")
 
     result = {
         "enabled": bool(key),
@@ -460,12 +516,12 @@ def _call_openrouter(
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "https://github.com/DimonZhi/SAWrap"),
-        "X-OpenRouter-Title": os.getenv("OPENROUTER_APP_TITLE", "SAWrap"),
+        "HTTP-Referer": _env_value("OPENROUTER_HTTP_REFERER", "https://github.com/DimonZhi/SAWrap"),
+        "X-OpenRouter-Title": _env_value("OPENROUTER_APP_TITLE", "SAWrap"),
     }
 
     request = Request(
-        os.getenv("OPENROUTER_API_URL", OPENROUTER_API_URL),
+        _env_value("OPENROUTER_API_URL", OPENROUTER_API_URL),
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
         method="POST",
@@ -526,9 +582,9 @@ def build_openrouter_chat_answer(
 ) -> dict[str, Any]:
     if not question.strip():
         return {
-            "enabled": bool(api_key or os.getenv("OPENROUTER_API_KEY")),
+            "enabled": bool(api_key or _env_value("OPENROUTER_API_KEY")),
             "provider": "OpenRouter",
-            "model": model or os.getenv("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL,
+            "model": model or _env_value("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL,
             "text": None,
             "error": "Вопрос пустой.",
         }
@@ -573,22 +629,30 @@ def build_ai_advice(base_dir: Path, dataset_id: str, task_id: str, use_llm: bool
         }
 
     df["method"] = df["method"].astype(str).str.strip()
-    df = df[df["method"].ne("")].copy()
+    base_df = df[df["method"].ne("")].copy()
+
     piecewise_rows, piecewise_variants = _piecewise_rows_for_advice(base_dir, dataset_id, task_id)
+    df = base_df.copy()
     if not piecewise_rows.empty:
         df = pd.concat([df, piecewise_rows], ignore_index=True, sort=False)
         df = df.drop_duplicates(subset=["method"], keep="last").copy()
 
     active_metrics, missing_metrics = _active_metrics(df, task_id)
+
     if not active_metrics:
         return {
             "has_result": False,
-            "error": "Для выбранной задачи в таблице нет подходящих метрик.",
+            "error": (
+                f"Для выбранной задачи «{TASK_CONFIGS[task_id]['label']}» в таблице нет подходящих метрик. "
+                "Сначала рассчитай этот пресет для датасета."
+            ),
             "dataset_id": dataset_id,
             "task_id": task_id,
+            "requested_task_id": task_id,
             "missing_metrics": missing_metrics,
         }
 
+    df = _filter_rows_with_metrics(df, active_metrics)
     scored = _score_models(df, active_metrics)
     top = scored.head(3)
     best = top.iloc[0]
@@ -609,6 +673,7 @@ def build_ai_advice(base_dir: Path, dataset_id: str, task_id: str, use_llm: bool
         "has_result": True,
         "dataset_id": dataset_id,
         "task_id": task_id,
+        "requested_task_id": task_id,
         "task_label": TASK_CONFIGS[task_id]["label"],
         "recommended_method": str(best["method"]),
         "score": round(float(best["ai_score"]) * 100),
@@ -618,12 +683,14 @@ def build_ai_advice(base_dir: Path, dataset_id: str, task_id: str, use_llm: bool
         "available_metrics": [metric["key"] for metric in active_metrics],
         "missing_metrics": missing_metrics,
         "table_path": str(table_path),
+        "fallback_task": False,
+        "fallback_note": None,
         "piecewise_included": bool(piecewise_variants),
         "piecewise_variants": piecewise_variants,
         "llm": {
             "enabled": False,
             "provider": "OpenRouter",
-            "model": os.getenv("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL,
+            "model": _env_value("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL,
             "text": None,
             "error": None,
         },

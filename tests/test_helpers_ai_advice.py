@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import UI.helpers_ai_advice as ai_advice_module
 from UI.helpers_ai_advice import (
     build_ai_advice,
     build_openrouter_chat_answer,
@@ -123,6 +124,77 @@ def test_build_ai_advice_reports_missing_task_metrics(tmp_path: Path):
     assert "RMSE_TIME" in advice["missing_metrics"]
 
 
+def test_build_ai_advice_does_not_fall_back_to_other_task(tmp_path: Path):
+    _write_dataset_table(
+        tmp_path,
+        "custom_demo",
+        pd.DataFrame(
+            {
+                "method": ["WeakModel", "StrongModel"],
+                "auc_event_mean": [0.62, 0.91],
+                "logloss_event_mean": [0.55, 0.22],
+            }
+        ),
+    )
+
+    advice = build_ai_advice(tmp_path, "custom_demo", "survival")
+
+    assert advice["has_result"] is False
+    assert advice["requested_task_id"] == "survival"
+    assert advice["task_id"] == "survival"
+    assert "Сначала рассчитай этот пресет" in advice["error"]
+
+
+def test_build_ai_advice_uses_any_model_with_selected_task_metrics(tmp_path: Path):
+    _write_dataset_table(
+        tmp_path,
+        "custom_demo",
+        pd.DataFrame(
+            {
+                "method": ["KNeighborsClassifier", "KaplanMeierFitter"],
+                "auc_event_mean": [0.70, 0.99],
+                "logloss_event_mean": [0.20, 0.05],
+            }
+        ),
+    )
+
+    advice = build_ai_advice(tmp_path, "custom_demo", "classification")
+
+    assert advice["has_result"] is True
+    assert advice["recommended_method"] == "KaplanMeierFitter"
+    assert [model["method"] for model in advice["top_models"]] == [
+        "KaplanMeierFitter",
+        "KNeighborsClassifier",
+    ]
+
+
+def test_build_ai_advice_keeps_selected_regression_task(tmp_path: Path):
+    _write_dataset_table(
+        tmp_path,
+        "custom_demo",
+        pd.DataFrame(
+            {
+                "method": ["KNeighborsClassifier", "ElasticNet", "RandomForestRegressor"],
+                "auc_event_mean": [0.95, 0.50, 0.40],
+                "logloss_event_mean": [0.10, 0.90, 0.80],
+                "rmse_time_mean": [100.0, 12.0, 8.0],
+                "r2_time_mean": [0.10, 0.55, 0.80],
+            }
+        ),
+    )
+
+    advice = build_ai_advice(tmp_path, "custom_demo", "regression")
+
+    assert advice["has_result"] is True
+    assert advice["task_id"] == "regression"
+    assert advice["recommended_method"] == "RandomForestRegressor"
+    assert [model["method"] for model in advice["top_models"]] == [
+        "RandomForestRegressor",
+        "ElasticNet",
+        "KNeighborsClassifier",
+    ]
+
+
 class _FakeResponse:
     def __enter__(self):
         return self
@@ -176,6 +248,7 @@ def test_build_openrouter_interpretation_uses_fake_transport(tmp_path: Path):
 
 def test_build_openrouter_interpretation_reports_missing_key(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(ai_advice_module, "_LOCAL_ENV_LOADED", True)
     advice = {
         "dataset_id": "toy",
         "task_label": "Анализ выживаемости",
@@ -188,6 +261,37 @@ def test_build_openrouter_interpretation_reports_missing_key(tmp_path: Path, mon
 
     assert llm["enabled"] is False
     assert "OPENROUTER_API_KEY" in llm["error"]
+
+
+def test_build_openrouter_interpretation_loads_local_env(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.setattr(ai_advice_module, "_LOCAL_ENV_LOADED", False)
+    (tmp_path / ".env").write_text(
+        'OPENROUTER_API_KEY="env-test-key"\nOPENROUTER_MODEL=test/env-model\n',
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_opener(request, timeout, context):
+        captured["auth"] = request.headers["Authorization"]
+        return _FakeResponse()
+
+    llm = build_openrouter_interpretation(
+        {
+            "dataset_id": "toy",
+            "task_label": "Классификация события",
+            "recommended_method": "Model",
+            "score": 50,
+            "top_models": [],
+        },
+        opener=fake_opener,
+    )
+
+    assert llm["enabled"] is True
+    assert llm["model"] == "test/env-model"
+    assert captured["auth"] == "Bearer env-test-key"
 
 
 def test_build_openrouter_chat_answer_includes_question_and_result_context(tmp_path: Path):

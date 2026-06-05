@@ -283,7 +283,12 @@ def wrap_model(raw_model, task: str):
     raise ValueError(task)
 
 
+def preset_for_task(task_id: str) -> dict:
+    return next((preset for preset in PRESETS if preset["preset_task"] == task_id), PRESETS[0])
+
+
 def home_context(request: Request, **overrides):
+    explicit_ai_selected = "ai_selected" in overrides
     context = {
         "request": request,
         "messages": [],
@@ -312,6 +317,13 @@ def home_context(request: Request, **overrides):
     selected_ctx = context.get("selected")
     if selected_ctx:
         context["show_demo"] = is_user_dataset(BASE_DIR, selected_ctx.get("dataset_id"))
+        if not explicit_ai_selected:
+            preset_id = selected_ctx.get("preset_id")
+            preset = next((preset for preset in PRESETS if preset["id"] == preset_id), None)
+            context["ai_selected"] = {
+                "dataset_id": selected_ctx.get("dataset_id"),
+                "task_id": (preset or PRESETS[0]).get("preset_task", "classification"),
+            }
     if context.get("demo_context") is None and selected_ctx:
         context["demo_context"] = demo_context_for_dataset(selected_ctx.get("dataset_id"))
     return context
@@ -433,6 +445,8 @@ async def upload_dataset(
     detail = f"{manifest['rows']} строк, {manifest['feature_count']} признаков"
     if manifest.get("dropped_rows"):
         detail += f", удалено строк при очистке: {manifest['dropped_rows']}"
+    if manifest.get("dropped_feature_count"):
+        detail += f", отброшено служебных/пустых признаков: {manifest['dropped_feature_count']}"
     return templates.TemplateResponse(
         request,
         "home.html",
@@ -524,11 +538,16 @@ async def ai_advice(
     ai_task_id: str = Form(...),
 ):
     advice = build_ai_advice(BASE_DIR, ai_dataset_id, ai_task_id, use_llm=True)
+    selected = default_selected(
+        dataset_id=ai_dataset_id,
+        preset_id=preset_for_task(ai_task_id)["id"],
+    )
     return templates.TemplateResponse(
         request,
         "home.html",
         home_context(
             request,
+            selected=selected,
             ai_selected={
                 "dataset_id": ai_dataset_id,
                 "task_id": ai_task_id,

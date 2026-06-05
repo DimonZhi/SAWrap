@@ -16,6 +16,8 @@ env/
 .mypy_cache/
 
 build/
+Exp/
+outputs/
 dist/
 results/
 rag_index/
