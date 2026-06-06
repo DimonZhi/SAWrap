@@ -1,4 +1,9 @@
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 __pycache__/
 *.py[cod]
 *.pyo
@@ -7,13 +12,23 @@ __pycache__/
 .venv/
 venv/
 env/
+.ml/
 
 .env
 .env.*
+!.env.example
 
 .ipynb_checkpoints/
+**/.ipynb_checkpoints/
+*.ipynb
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 build/
 Exp/
@@ -26,5 +41,9 @@ UI/user_datasets/
 UI/model_store/
 UI/tables/custom_*.xlsx
 UI/tables/Piecewise_custom_*.xlsx
+UI/tables/*_old*.xlsx
 
 *.log
+*.tmp
+*.temp
+*.bak
