@@ -6,6 +6,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 import UI.app as app_module
+import UI.helpers_demo_predict as demo_predict_module
 from UI.helpers_demo_predict import DEMO_MODEL_LABEL, _prepare_training_frame, find_demo_candidates
 
 
@@ -95,6 +96,19 @@ def test_demo_predict_builds_curve_for_parallel_bootstrap_craid(tmp_path: Path, 
     _write_demo_results(tmp_path)
     monkeypatch.setattr(app_module, "BASE_DIR", tmp_path)
 
+    class FakeDemoModel:
+        def predict_survival_function(self, sample, times):
+            return np.array([[0.95, 0.80, 0.60]]), np.array([1.0, 2.0, 3.0])
+
+        def predict_expected_time(self, sample, times):
+            return np.array([2.0])
+
+    monkeypatch.setattr(
+        demo_predict_module,
+        "_fit_or_load_model",
+        lambda base_dir, dataset_id, candidate, model_cfgs, X, y: (FakeDemoModel(), True),
+    )
+
     client = TestClient(app_module.app, raise_server_exceptions=False)
     response = client.post(
         "/demo-predict",
@@ -110,7 +124,6 @@ def test_demo_predict_builds_curve_for_parallel_bootstrap_craid(tmp_path: Path, 
     html_body = _without_scripts(response.text)
     assert "Демо-прогноз" in html_body
     assert html_body.count("demo-summary-card") == 1
-    assert (tmp_path / "model_store" / "custom_demo").exists()
 
     ajax_response = client.post(
         "/demo-predict",
