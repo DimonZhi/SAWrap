@@ -286,14 +286,14 @@
   <div class="section-heading">
     <div>
       <h2>AI-ассистент по проекту</h2>
-      <p>RAG по диплому, базе знаний, коду, README и таблицам результатов.</p>
+      <p>RAG по open-source/B2B идее, базе знаний, коду, README и таблицам результатов.</p>
     </div>
   </div>
 
   <div class="project-rag-shell" id="project-rag-shell" data-chat-url="{{ url_for('project_rag_chat') }}">
     <div class="project-rag-messages" id="project-rag-messages" aria-live="polite">
       <div class="ai-chat-message assistant">
-        Спроси про научную идею, метрики, архитектуру или результаты экспериментов.
+        Спроси про проблему цензурирования, выбор модели, Piecewise-обертки, B2B-сценарий или загрузку своего датасета.
       </div>
     </div>
 
@@ -303,7 +303,7 @@
         <textarea
           id="project-rag-question"
           rows="3"
-          placeholder="Например: в чем научная новизна проекта?"
+          placeholder="Например: как добавить свой датасет и какие колонки нужны?"
         ></textarea>
       </label>
       <button type="submit" class="btn btn-primary project-rag-send">Спросить RAG</button>
