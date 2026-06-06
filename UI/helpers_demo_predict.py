@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -26,6 +27,8 @@ from .helpers_tables import (
 
 
 MODEL_STORE_DIR = "model_store"
+DEMO_CANDIDATE_LIMIT = 1
+DEMO_MODEL_LABEL = "ParallelBootstrapCRAID"
 PIECEWISE_RE = re.compile(
     r"^(Piecewise(?:CensorAware)?ClassifWrapSA)\(([^,]+),\s*times=(\d+)\)$"
 )
@@ -78,6 +81,24 @@ def build_demo_input_context(dataset_id: str, X: pd.DataFrame | None) -> dict | 
         "dataset_id": dataset_id,
         "features": features,
     }
+
+
+def _prepare_training_frame(X: pd.DataFrame) -> pd.DataFrame:
+    prepared = X.copy()
+    for column in prepared.columns:
+        if not prepared[column].isna().any():
+            continue
+        numeric = pd.to_numeric(prepared[column], errors="coerce")
+        if numeric.notna().any():
+            fill_value = numeric.median()
+            if pd.isna(fill_value):
+                fill_value = 0.0
+            prepared[column] = numeric.fillna(fill_value)
+            continue
+        mode = prepared[column].dropna().mode()
+        fill_value = mode.iloc[0] if not mode.empty else ""
+        prepared[column] = prepared[column].fillna(fill_value)
+    return prepared
 
 
 def _active_metrics(df: pd.DataFrame, task_id: str) -> list[dict]:
@@ -162,8 +183,49 @@ def _best_piecewise_rows(df: pd.DataFrame) -> list[tuple[str, str, pd.Series, li
     return result
 
 
+def _best_demo_candidates(candidates: list[dict], limit: int = DEMO_CANDIDATE_LIMIT) -> list[dict]:
+    ranked = sorted(
+        enumerate(candidates),
+        key=lambda item: (float(item[1].get("score") or 0.0), -item[0]),
+        reverse=True,
+    )
+    return [candidate for _, candidate in ranked[:limit]]
+
+
+def _forced_demo_candidate(df: pd.DataFrame, method_label: str = DEMO_MODEL_LABEL) -> dict | None:
+    if df.empty or "method" not in df.columns:
+        return None
+
+    work = df[df["method"].astype(str).str.strip() == method_label].copy()
+    if work.empty:
+        return None
+
+    metrics = _candidate_metrics(work, "survival")
+    if not metrics:
+        return None
+
+    scored = _score_models(work, metrics)
+    if scored.empty:
+        return None
+
+    row = scored.iloc[0]
+    return {
+        "category": "survival",
+        "category_label": "Анализ выживаемости",
+        "method": str(row["method"]),
+        "score": float(row.get("ai_score", 0.0)),
+        "params": row.get("params"),
+        "task_id": "survival",
+        "metrics": [metric["key"] for metric in metrics],
+    }
+
+
 def find_demo_candidates(base_dir: Path, dataset_id: str, model_cfgs: list[dict]) -> list[dict]:
     regular_df = _load_result_table(get_surv_table_path(base_dir, dataset_id))
+    forced_candidate = _forced_demo_candidate(regular_df)
+    if forced_candidate is not None:
+        return [forced_candidate]
+
     piecewise_df = _load_result_table(get_piecewise_table_path(base_dir, dataset_id))
 
     labels_by_task = {
@@ -207,7 +269,7 @@ def find_demo_candidates(base_dir: Path, dataset_id: str, model_cfgs: list[dict]
             }
         )
 
-    return candidates
+    return _best_demo_candidates(candidates)
 
 
 def _parse_params(value) -> dict:
@@ -273,6 +335,17 @@ def _build_wrapped_model(candidate: dict, model_cfgs: list[dict]):
 
 def _model_cache_path(base_dir: Path, dataset_id: str, candidate: dict) -> Path:
     params = json.dumps(_parse_params(candidate.get("params")), sort_keys=True, default=str)
+    params_hash = hashlib.sha1(params.encode("utf-8")).hexdigest()[:12]
+    return (
+        base_dir
+        / MODEL_STORE_DIR
+        / _safe_slug(dataset_id)
+        / f"{candidate['category']}__{_safe_slug(candidate['method'])}__{params_hash}.joblib"
+    )
+
+
+def _legacy_model_cache_path(base_dir: Path, dataset_id: str, candidate: dict) -> Path:
+    params = json.dumps(_parse_params(candidate.get("params")), sort_keys=True, default=str)
     return (
         base_dir
         / MODEL_STORE_DIR
@@ -281,13 +354,26 @@ def _model_cache_path(base_dir: Path, dataset_id: str, candidate: dict) -> Path:
     )
 
 
+def _load_cached_model(path: Path):
+    try:
+        if path.exists():
+            return joblib.load(path)
+    except OSError:
+        return None
+    except Exception:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return None
+
+
 def _fit_or_load_model(base_dir: Path, dataset_id: str, candidate: dict, model_cfgs: list[dict], X: pd.DataFrame, y):
     cache_path = _model_cache_path(base_dir, dataset_id, candidate)
-    if cache_path.exists():
-        try:
-            return joblib.load(cache_path), True
-        except Exception:
-            cache_path.unlink(missing_ok=True)
+    for candidate_cache_path in (cache_path, _legacy_model_cache_path(base_dir, dataset_id, candidate)):
+        cached_model = _load_cached_model(candidate_cache_path)
+        if cached_model is not None:
+            return cached_model, True
 
     model = _build_wrapped_model(candidate, model_cfgs)
     model.fit(X, y, time_col="time", event_col="cens")
@@ -337,11 +423,12 @@ def build_demo_prediction(
     X, y, *_ = loaded
     if not isinstance(X, pd.DataFrame):
         X = pd.DataFrame(X)
+    X = _prepare_training_frame(X)
     candidates = find_demo_candidates(base_dir, dataset_id, model_cfgs)
     if not candidates:
         return {
             "ok": False,
-            "error": "Нет обученных результатов для classification, regression, survival или Piecewise.",
+            "error": f"Нет предрасчитанных результатов для {DEMO_MODEL_LABEL}.",
         }
 
     sample = _build_manual_frame(X, raw_values)

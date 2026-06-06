@@ -289,6 +289,7 @@ def preset_for_task(task_id: str) -> dict:
 
 def home_context(request: Request, **overrides):
     explicit_ai_selected = "ai_selected" in overrides
+    explicit_show_demo = "show_demo" in overrides
     context = {
         "request": request,
         "messages": [],
@@ -315,8 +316,11 @@ def home_context(request: Request, **overrides):
     }
     context.update(overrides)
     selected_ctx = context.get("selected")
+    if context.get("demo_context") is None and selected_ctx:
+        context["demo_context"] = demo_context_for_dataset(selected_ctx.get("dataset_id"))
     if selected_ctx:
-        context["show_demo"] = is_user_dataset(BASE_DIR, selected_ctx.get("dataset_id"))
+        if not explicit_show_demo:
+            context["show_demo"] = bool(context.get("demo_context"))
         if not explicit_ai_selected:
             preset_id = selected_ctx.get("preset_id")
             preset = next((preset for preset in PRESETS if preset["id"] == preset_id), None)
@@ -324,8 +328,6 @@ def home_context(request: Request, **overrides):
                 "dataset_id": selected_ctx.get("dataset_id"),
                 "task_id": (preset or PRESETS[0]).get("preset_task", "classification"),
             }
-    if context.get("demo_context") is None and selected_ctx:
-        context["demo_context"] = demo_context_for_dataset(selected_ctx.get("dataset_id"))
     return context
 
 
@@ -345,7 +347,18 @@ def default_selected(dataset_id: str | None = None, preset_id: str | None = None
 def load_dataset_for_recompute(dataset_id: str):
     if is_user_dataset(BASE_DIR, dataset_id):
         return load_user_dataset(BASE_DIR, dataset_id)
-    load_fn = getattr(ds, f"load_{dataset_id}_dataset", None)
+    loader_name = f"load_{dataset_id}_dataset"
+    load_fn = getattr(ds, loader_name, None)
+    if load_fn is None:
+        loader_name_lower = loader_name.lower()
+        load_fn = next(
+            (
+                getattr(ds, name)
+                for name in dir(ds)
+                if name.lower() == loader_name_lower
+            ),
+            None,
+        )
     if load_fn is None:
         return None
     return load_fn()
@@ -381,8 +394,6 @@ def delete_dataset_model_store(dataset_id: str) -> bool:
 
 def demo_context_for_dataset(dataset_id: str | None):
     if not dataset_id:
-        return None
-    if not is_user_dataset(BASE_DIR, dataset_id):
         return None
     try:
         loaded_dataset = load_dataset_for_recompute(dataset_id)
@@ -606,19 +617,13 @@ async def demo_predict(request: Request):
     }
     selected = default_selected(dataset_id=dataset_id, preset_id=preset_id)
 
-    if not is_user_dataset(BASE_DIR, dataset_id):
-        result = {
-            "ok": False,
-            "error": "Демо-прогноз доступен только для загруженных пользовательских датасетов.",
-        }
-    else:
-        result = build_demo_prediction(
-            base_dir=BASE_DIR,
-            dataset_id=dataset_id,
-            raw_values=feature_values,
-            model_cfgs=MODELS,
-            load_dataset=load_dataset_for_recompute,
-        )
+    result = build_demo_prediction(
+        base_dir=BASE_DIR,
+        dataset_id=dataset_id,
+        raw_values=feature_values,
+        model_cfgs=MODELS,
+        load_dataset=load_dataset_for_recompute,
+    )
 
     wants_json = "application/json" in str(request.headers.get("accept", "")).lower()
     if wants_json or str(form.get("_ajax", "")).strip() == "1":

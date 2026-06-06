@@ -5,7 +5,7 @@
 {% block content %}
 <div class="page-header">
   <h1>Главная</h1>
-  <p class="page-subtitle">Выбери датасет и модели, которые есть в таблицах ACTG, GBSG, PBC, Rott2, Smarto, Framingham и Support2.</p>
+  <p class="page-subtitle">Выберите датасет или загрузите свой и выберите метрики и модели.</p>
 </div>
 
 <form action="{{ url_for('compare_models') }}" method="post" enctype="multipart/form-data" class="grid-2">
@@ -293,7 +293,7 @@
   <div class="project-rag-shell" id="project-rag-shell" data-chat-url="{{ url_for('project_rag_chat') }}">
     <div class="project-rag-messages" id="project-rag-messages" aria-live="polite">
       <div class="ai-chat-message assistant">
-        Спроси про научную идею, метрики, архитектуру, результаты экспериментов или как объяснить проект на защите.
+        Спроси про научную идею, метрики, архитектуру или результаты экспериментов.
       </div>
     </div>
 

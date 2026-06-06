@@ -1,10 +1,12 @@
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
 
 import UI.app as app_module
+from UI.helpers_demo_predict import DEMO_MODEL_LABEL, _prepare_training_frame, find_demo_candidates
 
 
 def _without_scripts(html: str) -> str:
@@ -30,9 +32,10 @@ def _write_demo_results(base_dir: Path):
     tables_dir.mkdir()
     pd.DataFrame(
         {
-            "method": ["LogisticRegression", "ElasticNet", "KaplanMeierFitter"],
-            "ci_mean": [0.6, 0.55, 0.65],
-            "ibs_mean": [0.2, 0.25, 0.18],
+            "method": ["LogisticRegression", "ElasticNet", "KaplanMeierFitter", DEMO_MODEL_LABEL],
+            "ci_mean": [0.6, 0.55, 0.65, 0.5],
+            "ibs_mean": [0.2, 0.25, 0.18, 0.3],
+            "params": [None, None, None, "{'n_estimators': 2, 'random_state': 123}"],
         }
     ).to_excel(tables_dir / "custom_demo.xlsx", index=False)
     pd.DataFrame(
@@ -47,7 +50,47 @@ def _write_demo_results(base_dir: Path):
     ).to_excel(tables_dir / "Piecewise_custom_demo.xlsx", index=False)
 
 
-def test_demo_predict_builds_curves_for_available_model_families(tmp_path: Path, monkeypatch):
+def test_prepare_training_frame_imputes_missing_values():
+    X = pd.DataFrame(
+        {
+            "numeric": [1.0, np.nan, 3.0],
+            "categorical": ["a", None, "a"],
+        }
+    )
+
+    prepared = _prepare_training_frame(X)
+
+    assert prepared.isna().sum().sum() == 0
+    assert prepared.loc[1, "numeric"] == 2.0
+    assert prepared.loc[1, "categorical"] == "a"
+
+
+def test_load_dataset_for_recompute_finds_case_variant_loader(monkeypatch):
+    class FakeDatasets:
+        @staticmethod
+        def load_Framingham_dataset():
+            return "framingham-loaded"
+
+    monkeypatch.setattr(app_module, "ds", FakeDatasets)
+    monkeypatch.setattr(app_module, "is_user_dataset", lambda base_dir, dataset_id: False)
+
+    assert app_module.load_dataset_for_recompute("framingham") == "framingham-loaded"
+
+
+def test_find_demo_candidates_uses_parallel_bootstrap_craid(tmp_path: Path):
+    _write_demo_results(tmp_path)
+
+    candidates = find_demo_candidates(
+        tmp_path,
+        "custom_demo",
+        [{"label": DEMO_MODEL_LABEL, "task": "survival"}],
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["method"] == DEMO_MODEL_LABEL
+
+
+def test_demo_predict_builds_curve_for_parallel_bootstrap_craid(tmp_path: Path, monkeypatch):
     _write_demo_dataset(tmp_path)
     _write_demo_results(tmp_path)
     monkeypatch.setattr(app_module, "BASE_DIR", tmp_path)
@@ -66,12 +109,7 @@ def test_demo_predict_builds_curves_for_available_model_families(tmp_path: Path,
     assert response.status_code == 200
     html_body = _without_scripts(response.text)
     assert "Демо-прогноз" in html_body
-    assert "Классификация" in html_body
-    assert "Регрессия" in html_body
-    assert "Анализ выживаемости" in html_body
-    assert "Piecewise" in html_body
-    assert "Piecewise censor-aware" in html_body
-    assert html_body.count("demo-summary-card") == 5
+    assert html_body.count("demo-summary-card") == 1
     assert (tmp_path / "model_store" / "custom_demo").exists()
 
     ajax_response = client.post(
@@ -88,11 +126,13 @@ def test_demo_predict_builds_curves_for_available_model_families(tmp_path: Path,
     assert ajax_response.status_code == 200
     payload = ajax_response.json()
     assert payload["ok"] is True
-    assert len(payload["traces"]) == 5
+    assert len(payload["traces"]) == 1
+    assert len(payload["cards"]) == 1
+    assert payload["cards"][0]["method"] == DEMO_MODEL_LABEL
     assert "Демо-прогноз" not in ajax_response.text
 
 
-def test_demo_block_is_hidden_for_precomputed_datasets(tmp_path: Path, monkeypatch):
+def test_demo_block_is_visible_for_precomputed_datasets(tmp_path: Path, monkeypatch):
     tables_dir = tmp_path / "tables"
     tables_dir.mkdir()
     pd.DataFrame(
@@ -104,6 +144,21 @@ def test_demo_block_is_hidden_for_precomputed_datasets(tmp_path: Path, monkeypat
     ).to_excel(tables_dir / "actg.xlsx", index=False)
     monkeypatch.setattr(app_module, "BASE_DIR", tmp_path)
     monkeypatch.setattr(app_module, "DISABLE_MISSING_RECALC", True)
+    y = np.array(
+        [(True, 1.0), (False, 2.0), (True, 3.0), (False, 4.0), (True, 5.0)],
+        dtype=[("cens", "?"), ("time", "<f8")],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "load_dataset_for_recompute",
+        lambda dataset_id: (
+            pd.DataFrame({"x": [0.0, 1.0, 2.0, 3.0, 4.0]}),
+            y,
+            ["x"],
+            [],
+            None,
+        ),
+    )
 
     client = TestClient(app_module.app, raise_server_exceptions=False)
     response = client.post(
@@ -117,5 +172,44 @@ def test_demo_block_is_hidden_for_precomputed_datasets(tmp_path: Path, monkeypat
 
     assert response.status_code == 200
     html_body = _without_scripts(response.text)
-    assert "Демо-прогноз" not in html_body
-    assert "Построить демо-прогноз" not in html_body
+    assert "Демо-прогноз" in html_body
+    assert "Построить демо-прогноз" in html_body
+
+
+def test_demo_predict_accepts_precomputed_dataset(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(app_module, "BASE_DIR", tmp_path)
+    captured = {}
+
+    def fake_build_demo_prediction(base_dir, dataset_id, raw_values, model_cfgs, load_dataset):
+        captured["dataset_id"] = dataset_id
+        return {
+            "ok": True,
+            "dataset_id": dataset_id,
+            "traces": [{"name": "best", "x": [1.0], "y": [0.9]}],
+            "cards": [
+                {
+                    "category": "classification",
+                    "category_label": "Классификация",
+                    "method": "LogisticRegression",
+                    "expected_time": "1",
+                    "risk": "0.1",
+                    "source": "cache",
+                }
+            ],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(app_module, "build_demo_prediction", fake_build_demo_prediction)
+
+    client = TestClient(app_module.app, raise_server_exceptions=False)
+    response = client.post(
+        "/demo-predict",
+        headers={"Accept": "application/json"},
+        data={"dataset_id": "actg", "preset_id": "cls_auc_logloss", "feature__x": "1.0"},
+    )
+
+    assert response.status_code == 200
+    assert captured["dataset_id"] == "actg"
+    payload = response.json()
+    assert payload["ok"] is True
+    assert len(payload["traces"]) == 1
